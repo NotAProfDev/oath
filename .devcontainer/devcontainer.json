@@ -19,15 +19,17 @@
 			"moby": false
 		}
 	},
-	// Install system libraries needed by build scripts (e.g. bindgen/libclang for iceoryx2).
-	"postCreateCommand": "sudo apt-get update && sudo apt-get install -y libclang-dev && sudo rm -rf /var/lib/apt/lists/* && git config core.hooksPath .githooks",
+	// Install system libraries needed by build scripts (e.g. bindgen/libclang for iceoryx2),
+	// then install cargo-deny for local deny checks, and activate the git hooks.
+	"postCreateCommand": "sudo apt-get update && sudo apt-get install -y libclang-dev && sudo rm -rf /var/lib/apt/lists/* && cargo install --locked cargo-deny && git config core.hooksPath .githooks",
 	// Configure tool-specific properties.
 	"customizations": {
 		"vscode": {
 			"extensions": [
 				"rust-lang.rust-analyzer",
 				"fill-labs.dependi",
-				"tamasfe.even-better-toml"
+				"tamasfe.even-better-toml",
+				"github.vscode-github-actions"
 			],
 			"settings": {
 				// Use clippy instead of plain check so inline diagnostics match CI.

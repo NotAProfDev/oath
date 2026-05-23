@@ -64,7 +64,11 @@ highlight = "all"
 deny = []
 # Known transitive duplicates outside our control.
 # Review and prune this list whenever major dependencies are upgraded.
-skip = []
+skip = [
+    # uuid -> getrandom -> wasip2 (0.57.1) and wasip3 (0.51.0) pull in different
+    # wit-bindgen versions; both are transitive and outside our control.
+    { name = "wit-bindgen" },
+]
 
 # --- Sources ---
 # Only allow dependencies from crates.io; reject unknown registries and raw git deps.
