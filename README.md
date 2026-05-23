@@ -2,6 +2,8 @@
 
 # OATH — Open Automatic Trading Hub
 
+[![CI](https://github.com/NotAProfDev/oath/actions/workflows/ci.yml/badge.svg)](https://github.com/NotAProfDev/oath/actions/workflows/ci.yml)
+
 A modular, backend-agnostic trading engine for Rust.
 
 Every subsystem is defined behind a trait. Backends, adapters, transports, and strategies are all independently swappable. Users implement `Strategy`; everything else is configurable and replaceable.
