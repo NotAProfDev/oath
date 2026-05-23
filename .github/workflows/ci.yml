@@ -26,7 +26,7 @@ jobs:
       # Preserve ANSI colour codes in cargo output for readable Actions logs.
       CARGO_TERM_COLOR: always
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
         # dtolnay/rust-toolchain reads rust-toolchain.toml automatically,
         # so the channel, components, and profile are sourced from that file.
@@ -66,7 +66,7 @@ jobs:
         # Upload the generated HTML docs as a workflow artifact (viewable in the
         # Actions UI; kept for 7 days to avoid burning the default 90-day quota).
       - name: upload docs
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: docs
           path: target/doc
@@ -88,9 +88,9 @@ jobs:
     env:
       CARGO_TERM_COLOR: always
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: dtolnay/rust-toolchain@1.85
+      - uses: dtolnay/rust-toolchain@1.100
 
         # Cache keyed separately from the `ci` job because of the different toolchain.
       - uses: Swatinem/rust-cache@v2
