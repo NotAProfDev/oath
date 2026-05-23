@@ -11,5 +11,7 @@ ca = "check --workspace --all-targets"
 la = "clippy --workspace --all-targets -- -D warnings"
 # Run the full test suite across every workspace crate.
 ta = "test --workspace"
+# Run cargo-deny to check licenses, bans, advisories, and sources.
+da = "deny --all-features check"
 # Point Git at the project's hook directory. Run once after cloning (automatic in devcontainer).
 setup = "!git config core.hooksPath .githooks"

@@ -26,16 +26,17 @@ description = "A modular, backend-agnostic trading engine"
 
 # --- Dependencies ---
 [workspace.dependencies]
-# Internal crates
-oath-model = { path = "crates/model" }
-oath-net-core = { path = "crates/net/core" }
-oath-messaging-core = { path = "crates/messaging/core" }
-oath-persistence-core = { path = "crates/persistence/core" }
-oath-ingest-core = { path = "crates/ingest/core" }
-oath-execution-core = { path = "crates/execution/core" }
-oath-portfolio-core = { path = "crates/portfolio/core" }
-oath-risk-core = { path = "crates/risk/core" }
-oath-strategy-core = { path = "crates/strategy/core" }
+# Internal crates — version is required so cargo-deny can resolve the dep and
+# does not treat { workspace = true } path deps as wildcard requirements.
+oath-model            = { path = "crates/model",            version = "0.1.0" }
+oath-net-core         = { path = "crates/net/core",         version = "0.1.0" }
+oath-messaging-core   = { path = "crates/messaging/core",   version = "0.1.0" }
+oath-persistence-core = { path = "crates/persistence/core", version = "0.1.0" }
+oath-ingest-core      = { path = "crates/ingest/core",      version = "0.1.0" }
+oath-execution-core   = { path = "crates/execution/core",   version = "0.1.0" }
+oath-portfolio-core   = { path = "crates/portfolio/core",   version = "0.1.0" }
+oath-risk-core        = { path = "crates/risk/core",        version = "0.1.0" }
+oath-strategy-core    = { path = "crates/strategy/core",    version = "0.1.0" }
 
 # External shared — backend-specific deps belong in individual crate Cargo.toml files
 serde = { version = "1", features = ["derive"] }
