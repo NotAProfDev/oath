@@ -9,6 +9,13 @@
 # the full suite (--all-targets, --all-features, tests, doc, cargo-deny).
 set -e
 
+# Reject direct commits to main — all changes must go through a PR.
+branch=$(git symbolic-ref HEAD 2>/dev/null)
+if [ "$branch" = "refs/heads/main" ]; then
+    echo "error: direct commits to main are not allowed; create a feature branch first"
+    exit 1
+fi
+
 # Reject if any file diverges from the canonical rustfmt style.
 # Fix with: cargo fmt --all
 cargo fmt --all -- --check
