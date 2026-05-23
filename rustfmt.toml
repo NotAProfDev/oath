@@ -1,0 +1,27 @@
+# Rustfmt configuration.
+# Full reference: https://github.com/rust-lang/rustfmt/blob/main/Configurations.md
+
+# --- Language ---
+# The Rust edition used for parsing. Must match the workspace edition.
+# (Default: "2015")
+edition = "2024"
+
+# --- Line endings ---
+# Force Unix line endings on all platforms.
+# (Default: "Auto" — detected per file)
+newline_style = "Unix"
+
+# --- Match arms ---
+# Add a trailing comma after block-based match arms (non-block arms are unaffected).
+# (Default: false)
+match_block_trailing_comma = true
+
+# --- Imports ---
+# TODO: enable once both options are stabilized.
+#   https://github.com/rust-lang/rustfmt/issues/4991 (imports_granularity)
+#   https://github.com/rust-lang/rustfmt/issues/5083 (group_imports)
+# Merge imports from the same module into a single `use` statement.
+# imports_granularity = "Module"
+
+# Group std/core/alloc, external crates, and self/super/crate into separate blocks.
+# group_imports = "StdExternalCrate"

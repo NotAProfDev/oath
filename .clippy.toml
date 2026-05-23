@@ -1,0 +1,13 @@
+# Clippy configuration.
+# Full reference: https://doc.rust-lang.org/clippy/configuration.html
+#
+# These settings apply workspace-wide. Per-crate overrides can be placed in a
+# crate-local .clippy.toml next to the crate's Cargo.toml.
+
+# Allow unwrap() and expect() inside test functions and #[cfg(test)] modules.
+# This avoids requiring #[allow(clippy::unwrap_used)] in every test block.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+
+# Allow direct indexing inside test functions and #[cfg(test)] modules.
+allow-indexing-slicing-in-tests = true

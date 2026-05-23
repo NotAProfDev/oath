@@ -1,0 +1,76 @@
+# cargo-deny configuration.
+# Full reference: https://embarkstudios.github.io/cargo-deny/checks/index.html
+#
+# Run locally: cargo deny --all-features check
+
+# --- Graph ---
+# Check dependencies across all feature combinations.
+[graph]
+# (Default: false)
+all-features = true
+
+# --- Advisories ---
+# Checks the RustSec advisory database for known vulnerabilities, unmaintained
+# crates, and yanked versions.
+[advisories]
+# Yanked versions should never be in a lockfile.
+# (Default: "warn")
+yanked = "deny"
+# Fail on unmaintained advisories for direct workspace dependencies only;
+# transitive unmaintained deps do not block CI.
+# (Default: "all" — fails for every unmaintained crate in the graph)
+unmaintained = "workspace"
+# Per-advisory exceptions — use sparingly. Always include id, reason, and a
+# TODO pointing to the upstream fix or tracking issue.
+# Example:
+#   { id = "RUSTSEC-2024-XXXX", reason = "unmaintained transitive dep via foo; tracked at owner/repo#123" }
+ignore = []
+
+# --- Licenses ---
+# Allowlist approach: any license not listed here causes a hard failure.
+# All identifiers are SPDX expressions; add entries deliberately with rationale.
+[licenses]
+# Minimum confidence for automated license file detection; below this threshold
+# the license is treated as unknown and the check fails.
+# (Default: 0.8)
+confidence-threshold = 0.93
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception", # compiler-builtins and LLVM ecosystem
+    "ISC",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "Zlib",                           # miniz_oxide and friends
+    "Unicode-3.0",
+    "Unicode-DFS-2016",               # unicode_idents
+    "CC0-1.0",                        # public-domain equivalents
+    "0BSD",
+]
+
+[licenses.private]
+# Workspace crates are not published to crates.io; skip license checks for them.
+ignore = true
+
+# --- Bans ---
+# Detects duplicate dependency versions and wildcard version requirements.
+[bans]
+# Wildcard requirements (e.g. `foo = "*"`) are never acceptable in production.
+# (Default: "warn")
+wildcards = "deny"
+# Report all duplicate instances, not just the first.
+highlight = "all"
+# Crates that must never appear in the dependency tree.
+deny = []
+# Known transitive duplicates outside our control.
+# Review and prune this list whenever major dependencies are upgraded.
+skip = []
+
+# --- Sources ---
+# Only allow dependencies from crates.io; reject unknown registries and raw git deps.
+# Default allow-registry is crates.io; default allow-git is empty.
+[sources]
+# (Default: "warn")
+unknown-registry = "deny"
+# (Default: "warn")
+unknown-git = "deny"

@@ -1,0 +1,103 @@
+# CI workflow — runs on every push to main and on every pull request.
+# Full reference: https://docs.github.com/en/actions/writing-workflows/workflow-syntax-for-github-actions
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cancel any in-progress run for the same branch when a new push arrives,
+# avoiding redundant work on fast-moving PR branches.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    name: CI
+    runs-on: ubuntu-latest
+    # Minimal token permissions — this job only needs to read the repository
+    # and write to Actions (cache + artifact upload).
+    permissions:
+      contents: read
+    env:
+      # Preserve ANSI colour codes in cargo output for readable Actions logs.
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v4
+
+        # dtolnay/rust-toolchain reads rust-toolchain.toml automatically,
+        # so the channel, components, and profile are sourced from that file.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+        # Cache ~/.cargo/registry, ~/.cargo/git, and target/ keyed by OS,
+        # Rust version, and Cargo.lock — typically 5–10× faster on cache hits.
+      - uses: Swatinem/rust-cache@v2
+
+        # Reject any formatting divergence; must pass before heavier checks.
+      - name: fmt
+        run: cargo fmt --all -- --check
+
+        # Type-check every crate and target (bins, tests, benches) without codegen.
+      - name: check
+        run: cargo check --workspace --all-targets --all-features
+
+        # Lint every crate and target; -D warnings turns all warnings into hard failures.
+      - name: clippy
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+        # Run the full test suite.
+      - name: test
+        run: cargo test --workspace --all-features
+
+        # Build docs for all workspace crates. RUSTDOCFLAGS catches broken intra-doc
+        # links and other rustdoc warnings. RUSTFLAGS is intentionally omitted —
+        # [workspace.lints.rust] already promotes rustc warnings to errors for our
+        # crates without affecting dependencies or busting the Swatinem cache key.
+      - name: doc
+        run: cargo doc --workspace --no-deps --document-private-items --all-features
+        env:
+          RUSTDOCFLAGS: "-D warnings"
+
+        # Upload the generated HTML docs as a workflow artifact (viewable in the
+        # Actions UI; kept for 7 days to avoid burning the default 90-day quota).
+      - name: upload docs
+        uses: actions/upload-artifact@v4
+        with:
+          name: docs
+          path: target/doc
+          retention-days: 7
+
+        # Audit licenses, advisories, bans, and sources against deny.toml.
+      - name: deny
+        uses: EmbarkStudios/cargo-deny-action@v2
+
+  # Verify that the codebase compiles on the declared minimum supported Rust
+  # version. rust-version = "1.85" in Cargo.toml is metadata only — without
+  # this job, accidentally using a post-1.85 API would go undetected until a
+  # downstream user reports a compile error.
+  msrv:
+    name: MSRV (1.85)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@1.85
+
+        # Cache keyed separately from the `ci` job because of the different toolchain.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: msrv
+
+        # Only check compilation — no clippy (it may introduce post-MSRV lints)
+        # and no tests (test harness APIs may differ across Rust versions).
+      - name: check
+        run: cargo check --workspace --all-targets --all-features

@@ -1,0 +1,20 @@
+[package]
+name = "oath-model"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+serde = { workspace = true }
+thiserror = { workspace = true }
+
+# Model-specific dependencies — isolated here intentionally.
+# Other crates never depend on these directly; they consume newtypes from this crate.
+# To swap the time or decimal backend, change only this file and its implementations.
+rust_decimal = { version = "1", features = ["serde-with-str"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+time = { version = "0.3", features = ["serde"] }

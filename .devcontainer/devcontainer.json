@@ -1,0 +1,40 @@
+// For format details, see https://aka.ms/devcontainer.json. For config options, see the
+// README at: https://github.com/devcontainers/templates/tree/main/src/rust
+{
+	"name": "Rust",
+	// Or use a Dockerfile or Docker Compose file. More info: https://containers.dev/guide/dockerfile
+	"image": "mcr.microsoft.com/devcontainers/rust:2-1-trixie",
+	// Use 'mounts' to make the cargo cache persistent in a Docker Volume.
+	// "mounts": [
+	// 	{
+	// 		"source": "devcontainer-cargo-cache-${devcontainerId}",
+	// 		"target": "/usr/local/cargo",
+	// 		"type": "volume"
+	// 	}
+	// ]
+	// Enables `docker` CLI inside the devcontainer by mounting the host's
+	// Docker socket.  Sibling containers run on the host engine, not nested.
+	"features": {
+		"ghcr.io/devcontainers/features/docker-outside-of-docker:1": {
+			"moby": false
+		}
+	},
+	// Install system libraries needed by build scripts (e.g. bindgen/libclang for iceoryx2).
+	"postCreateCommand": "sudo apt-get update && sudo apt-get install -y libclang-dev && sudo rm -rf /var/lib/apt/lists/* && git config core.hooksPath .githooks",
+	// Configure tool-specific properties.
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"rust-lang.rust-analyzer",
+				"fill-labs.dependi",
+				"tamasfe.even-better-toml"
+			],
+			"settings": {
+				// Use clippy instead of plain check so inline diagnostics match CI.
+				"rust-analyzer.check.command": "clippy"
+			}
+		}
+	}
+	// Uncomment to connect as root instead. More info: https://aka.ms/dev-containers-non-root.
+	// "remoteUser": "root"
+}

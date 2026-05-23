@@ -1,0 +1,17 @@
+#!/bin/sh
+# Pre-commit hook: rejects commits that fail formatting or introduce lint errors.
+#
+# Activation (one-time per clone):
+#   cargo setup        — runs `git config core.hooksPath .githooks`
+#   devcontainer       — postCreateCommand runs `cargo setup` automatically
+#
+# Intentionally lightweight — it runs on every commit. CI is the safety net for
+# the full suite (--all-targets, --all-features, tests, doc, cargo-deny).
+set -e
+
+# Reject if any file diverges from the canonical rustfmt style.
+# Fix with: cargo fmt --all
+cargo fmt --all -- --check
+
+# Reject if any lint fires; -D warnings promotes all warnings to hard errors.
+cargo clippy --workspace -- -D warnings

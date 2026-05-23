@@ -1,0 +1,46 @@
+# Dependabot configuration.
+# Full reference: https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+#
+# Opens weekly PRs for outdated dependencies across all three package ecosystems.
+# Cargo.lock is gitignored (library convention), so Dependabot targets Cargo.toml
+# version constraints directly.
+version: 2
+updates:
+  # Rust crate dependencies — targets version constraints in Cargo.toml files.
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "chore(deps)"
+    # GitHub auto-creates the "dependencies" label on the first Dependabot PR.
+    labels: ["dependencies"]
+    # Batch all crate bumps into one PR per week instead of one PR per crate.
+    groups:
+      rust-crates:
+        patterns: ["*"]
+
+  # GitHub Actions — pins action versions in .github/workflows/*.yml.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "ci(actions)"
+    labels: ["ci"]
+    groups:
+      github-actions:
+        patterns: ["*"]
+
+  # Dev container features — updates feature versions in devcontainer.json and
+  # regenerates devcontainer-lock.json with fresh digests.
+  - package-ecosystem: devcontainers
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "ci(devcontainer)"
+    labels: ["ci"]
+    groups:
+      devcontainer-features:
+        patterns: ["*"]

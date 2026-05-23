@@ -1,0 +1,21 @@
+[package]
+name = "oath-engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+oath-model = { workspace = true }
+oath-net-core = { workspace = true }
+oath-messaging-core = { workspace = true }
+oath-persistence-core = { workspace = true }
+oath-ingest-core = { workspace = true }
+oath-execution-core = { workspace = true }
+oath-portfolio-core = { workspace = true }
+oath-risk-core = { workspace = true }
+oath-strategy-core = { workspace = true }
+tokio = { workspace = true }
