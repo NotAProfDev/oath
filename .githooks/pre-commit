@@ -2,8 +2,8 @@
 # Pre-commit hook: rejects commits that fail formatting or introduce lint errors.
 #
 # Activation (one-time per clone):
-#   cargo setup        — runs `git config core.hooksPath .githooks`
-#   devcontainer       — postCreateCommand runs `cargo setup` automatically
+#   just setup         — runs `git config core.hooksPath .githooks`
+#   devcontainer       — postCreateCommand runs `just setup` automatically
 #
 # Intentionally lightweight — it runs on every commit. CI is the safety net for
 # the full suite (--all-targets, --all-features, tests, doc, cargo-deny).
