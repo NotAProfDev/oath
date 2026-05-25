@@ -1,0 +1,40 @@
+name: ❓ Question
+description: Ask a question about using or developing OATH
+title: "[Question] <short description>"
+labels: ["question", "needs-triage"]
+assignees: [NotAProfDev]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for your question! Please check existing issues and discussions first.
+
+  - type: checkboxes
+    attributes:
+      label: Is there an existing issue or discussion for this?
+      description: Please search to see if your question has already been answered.
+      options:
+        - label: I have searched the existing issues and discussions
+          required: true
+
+  - type: textarea
+    id: question
+    attributes:
+      label: Your question
+      description: A clear and concise description of what you want to know.
+    validations:
+      required: true
+
+  - type: textarea
+    id: details
+    attributes:
+      label: Details or minimal example
+      description: Provide as much context as possible. If applicable, include a small code snippet to illustrate your question.
+      placeholder: |
+        (Optional) Paste a minimal code snippet or example here
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Any other background information that might help answer your question.
