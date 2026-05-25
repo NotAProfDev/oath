@@ -9,5 +9,8 @@ license.workspace = true
 workspace = true
 
 [dependencies]
-oath-model = { workspace = true }
-thiserror = { workspace = true }
+bytes        = { workspace = true }
+http         = { workspace = true }
+http-body    = { workspace = true }
+futures-core = { workspace = true }
+futures-sink = { workspace = true }

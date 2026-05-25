@@ -40,10 +40,15 @@ oath-risk-core = { path = "crates/risk/core", version = "0.1.0" }
 oath-strategy-core = { path = "crates/strategy/core", version = "0.1.0" }
 
 # External shared — backend-specific deps belong in individual crate Cargo.toml files
-serde = { version = "1", features = ["derive"] }
-thiserror = "2"
-tokio = { version = "1", features = ["full"] }
-tracing = "0.1"
+bytes        = "1"
+http         = "1"
+http-body    = "1"
+futures-core = { version = "0.3", default-features = false }
+futures-sink = { version = "0.3", default-features = false }
+serde        = { version = "1", features = ["derive"] }
+thiserror    = "2"
+tokio        = { version = "1", features = ["full"] }
+tracing      = "0.1"
 
 # --- Lints ---
 # Centralized lint configuration inherited by all workspace crates via `[lints] workspace = true`.
