@@ -29,7 +29,8 @@ Cargo.lock
 
 ### IDEs ###
 # Visual Studio Code
-.vscode/
+.vscode/*
+!.vscode/mcp.json
 .history/
 
 # IntelliJ
