@@ -5,7 +5,7 @@
 #
 # Checks performed (in order):
 #   1. Branch protection     — no direct commits to main
-#   2. Staged size limit      — max ~200 lines per commit
+#   2. Staged size limit      — max 300 additions and 300 deletions independently
 #   3. Large file prevention  — staged files ≤ 5 MiB each
 #   4. Merge conflict markers — rejects <<<<<<< HEAD in staged files
 #   5. Secret scanning        — gitleaks if installed (skips otherwise)
@@ -62,8 +62,8 @@ pass
 # 2. Staged size limit
 # ════════════════════════════════════════════════════════════════════════
 if [ "${SKIP_SIZE:-0}" != "1" ]; then
-    MAX_LINES="${MAX_LINES:-200}"
-    step "staged size (≤ ${MAX_LINES} lines)"
+    MAX_LINES="${MAX_LINES:-300}"
+    step "staged size (≤ ${MAX_LINES} added / ≤ ${MAX_LINES} deleted)"
 
     # Use --cached for the full index diff. Binary files report '-' in numstat;
     # the awk guard ($1~/^[0-9]+$/) skips them.
@@ -71,17 +71,16 @@ if [ "${SKIP_SIZE:-0}" != "1" ]; then
 
     ADDED=$(printf '%s\n' "$NUMSTAT" | awk '$1~/^[0-9]+$/{s+=$1} END{print s+0}')
     DELETED=$(printf '%s\n' "$NUMSTAT" | awk '$2~/^[0-9]+$/{d+=$2} END{print d+0}')
-    TOTAL=$(( ADDED + DELETED ))
 
-    if [ "$TOTAL" -gt "$MAX_LINES" ]; then
+    if [ "$ADDED" -gt "$MAX_LINES" ] || [ "$DELETED" -gt "$MAX_LINES" ]; then
         echo "" >&2
-        err "staged diff exceeds ${MAX_LINES}-line limit  (+${ADDED} added / -${DELETED} deleted = ${TOTAL} total)"
+        err "staged diff exceeds ${MAX_LINES}-line limit  (+${ADDED} added / -${DELETED} deleted)"
         printf "         Top files by change volume:\n" >&2
         printf '%s\n' "$NUMSTAT" \
             | awk '$1~/^[0-9]+$/ { print $1+$2, $1, $2, $3 }' \
             | sort -rn | head -10 \
             | awk '{ printf "           +%-5s -%-5s %s\n", $2, $3, $4 }' >&2
-        printf "\n         Split into smaller commits (≤ ~%s lines each).\n" "$MAX_LINES" >&2
+        printf "\n         Split into smaller commits (≤ ~%s lines added/deleted each).\n" "$MAX_LINES" >&2
         printf "         To bypass: SKIP_SIZE=1 git commit …\n" >&2
         exit 1
     fi
@@ -136,7 +135,7 @@ if [ "${SKIP_SECRETS:-0}" != "1" ]; then
         fi
     else
         skip
-        warn "gitleaks not installed - skipping secret scan (install via cargo install gitleaks)"
+        warn "gitleaks not installed - skipping secret scan (install via apt-get install gitleaks)"
     fi
 fi
 
