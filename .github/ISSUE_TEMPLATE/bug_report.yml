@@ -17,6 +17,20 @@ body:
         - label: I have searched the existing issues
           required: true
 
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severity
+      description: How severely does this bug impact your workflow?
+      options:
+        - P0 (system down / data loss)
+        - P1 (major feature broken, no workaround)
+        - P2 (minor feature broken, workaround exists)
+        - P3 (cosmetic / low-impact)
+      default: 2
+    validations:
+      required: true
+
   - type: textarea
     id: description
     attributes:

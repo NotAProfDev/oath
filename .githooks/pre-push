@@ -1,0 +1,81 @@
+#!/bin/sh
+# .githooks/pre-push
+#
+# Runs slower safety checks before pushing to a remote.
+# These are intentionally not in pre-commit because they take >5s and would
+# slow down local iteration. CI also runs these (and more), so this is a
+# final local gate — not a replacement for CI.
+#
+# Checks performed:
+#   1. Test compilation     — cargo test --no-run (catches broken tests before push)
+#   2. License audit        — cargo deny check (if cargo-deny installed)
+#
+# Bypass env-vars (prefix git push or export before the command):
+#   SKIP_HOOKS=1    — skip all checks below
+#   SKIP_TEST=1     — skip test compilation
+#   SKIP_DENY=1     — skip cargo deny
+
+set -e
+
+[ "${SKIP_HOOKS:-0}" = "1" ] && exit 0
+
+# ── Colour helpers (only when stderr is a real terminal) ────────────────
+if [ -t 2 ]; then
+    R='\033[0;31m' Y='\033[1;33m' C='\033[0;36m' G='\033[0;32m' Z='\033[0m'
+else
+    R='' Y='' C='' G='' Z=''
+fi
+
+err()  { printf "${R}error:${Z}   %s\n" "$*" >&2; }
+warn() { printf "${Y}warning:${Z} %s\n" "$*" >&2; }
+step() { printf "${C}  ▸${Z} %s" "$*"; }
+pass() { printf " ${G}ok${Z}\n"; }
+skip() { printf " ${Y}skip${Z}\n"; }
+
+# ── Scratch space (auto-removed on any exit) ────────────────────────────
+SCRATCH=$(mktemp -d) || { err "mktemp -d failed"; exit 1; }
+trap 'rm -rf "$SCRATCH"' EXIT INT TERM
+
+# ════════════════════════════════════════════════════════════════════════
+# 1. Test compilation
+# ════════════════════════════════════════════════════════════════════════
+if [ "${SKIP_TEST:-0}" != "1" ]; then
+    step "test compilation"
+    if ! command -v cargo >/dev/null 2>&1; then
+        skip
+        warn "cargo not found - skipping test compilation"
+    else
+        TEST_LOG="$SCRATCH/test.txt"
+        # --no-run compiles tests without executing them — fast enough for pre-push.
+        # CI runs the full suite with all features and actual execution.
+        if ! cargo test --workspace --all-features --no-run >"$TEST_LOG" 2>&1; then
+            echo "" >&2
+            err "test compilation failed"
+            cat "$TEST_LOG" >&2
+            printf "\n         To bypass: SKIP_TEST=1 git push …\n" >&2
+            exit 1
+        fi
+        pass
+    fi
+fi
+
+# ════════════════════════════════════════════════════════════════════════
+# 2. License / advisory audit (cargo deny)
+# ════════════════════════════════════════════════════════════════════════
+if [ "${SKIP_DENY:-0}" != "1" ]; then
+    step "license audit"
+    if ! command -v cargo-deny >/dev/null 2>&1; then
+        skip
+        warn "cargo-deny not installed - skipping license check (install via cargo install cargo-deny)"
+    else
+        DENY_LOG="$SCRATCH/deny.txt"
+        if ! cargo deny check --all-features >"$DENY_LOG" 2>&1; then
+            echo "" >&2
+            err "cargo-deny reported issues"
+            cat "$DENY_LOG" >&2
+            printf "\n         To bypass: SKIP_DENY=1 git push …\n" >&2
+            exit 1
+        fi
+        pass
+    fi
+fi

@@ -10,18 +10,33 @@ body:
         Thanks for suggesting an improvement. Please describe your idea in detail.
 
   - type: checkboxes
+    id: prerequisites
     attributes:
-      label: Is there an existing issue for this?
-      description: Please search to see if an issue already exists for the feature you are requesting.
+      label: Prerequisites
+      description: Please check the following before submitting.
       options:
         - label: I have searched the existing issues
           required: true
+        - label: This feature is not already covered by an open issue
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      description: How important is this feature?
+      options:
+        - P0 (blocking)
+        - P1 (important)
+        - P2 (nice-to-have)
+      default: 1
 
   - type: textarea
     id: problem
     attributes:
       label: Problem or motivation
       description: What problem does this solve, or what need does it address?
+      placeholder: |
+        As a trader using OATH, I'm frustrated by...
     validations:
       required: true
 
@@ -34,6 +49,46 @@ body:
         (Optional) Paste a minimal code snippet or example here
     validations:
       required: true
+
+  - type: textarea
+    id: acceptance-criteria
+    attributes:
+      label: Acceptance criteria
+      description: Specific conditions that must be met for this feature to be considered complete. Use bullet points.
+      placeholder: |
+        - [ ] User can place an order via the REST API
+        - [ ] Order is persisted in the database before acknowledgment
+        - [ ] Risk checks run before execution
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: In scope
+      description: What this PRD explicitly covers.
+      placeholder: "Order placement via REST API, database persistence, risk pre-check"
+
+  - type: textarea
+    id: out-of-scope
+    attributes:
+      label: Out of scope / Non-goals
+      description: What is explicitly NOT covered by this feature. Prevents scope creep.
+      placeholder: "WebSocket support, order cancellation, historical backtesting"
+
+  - type: input
+    id: plan_link
+    attributes:
+      label: Implementation Plan
+      description: Link to the implementation plan at .claude/plans/<slug>.md (created by /plan-feature). If not yet created, leave blank.
+      placeholder: ".claude/plans/order-lifecycle.md"
+
+  - type: textarea
+    id: affected-crates
+    attributes:
+      label: Affected crates
+      description: Which OATH crates will this feature touch? (model, net/core, messaging/core, persistence/core, ingest/core, execution/core, portfolio/core, risk/core, strategy/core, engine)
+      placeholder: "oath-model, oath-execution-core"
 
   - type: textarea
     id: alternatives

@@ -20,8 +20,8 @@
 		}
 	},
 	// Install system libraries needed by build scripts (e.g. bindgen/libclang for iceoryx2),
-	// install just (task runner) and cargo-deny, then activate the git hooks.
-	"postCreateCommand": "sudo apt-get update && sudo apt-get install -y libclang-dev just && sudo rm -rf /var/lib/apt/lists/* && cargo install --locked cargo-deny && just setup",
+	// install just (task runner), cargo-deny, and gitleaks, then activate the git hooks.
+	"postCreateCommand": "sudo apt-get update && sudo apt-get install -y libclang-dev just && sudo rm -rf /var/lib/apt/lists/* && cargo install --locked cargo-deny gitleaks && just setup",
 	// Configure tool-specific properties.
 	"customizations": {
 		"vscode": {
