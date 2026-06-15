@@ -29,7 +29,7 @@ fi
 err()  { printf "${R}error:${Z}   %s\n" "$*" >&2; }
 warn() { printf "${Y}warning:${Z} %s\n" "$*" >&2; }
 step() { printf "${C}  ▸${Z} %s" "$*"; }
-pass() { printf " ${G}ok${Z}\n"; }
+pass() { printf "\n ${G}ok${Z}\n"; }
 skip() { printf " ${Y}skip${Z}\n"; }
 
 # ── Scratch space (auto-removed on any exit) ────────────────────────────
