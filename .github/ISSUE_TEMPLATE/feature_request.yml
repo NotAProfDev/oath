@@ -25,10 +25,13 @@ body:
       label: Priority
       description: How important is this feature?
       options:
-        - P0 (blocking)
-        - P1 (important)
-        - P2 (nice-to-have)
-      default: 1
+        - P0 (blocking / critical)
+        - P1 (high — important)
+        - P2 (medium — nice-to-have)
+        - P3 (low — someday / maybe)
+      default: 2
+    validations:
+      required: true
 
   - type: textarea
     id: problem
