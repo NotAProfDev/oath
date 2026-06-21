@@ -74,6 +74,16 @@ git config core.hooksPath .githooks
 
 This is done automatically inside the dev container.
 
+### Dev container
+
+The dev container provisions all tooling (`gh`, `just`, `gitleaks`,
+`shellcheck`, `actionlint`, `typos`, `taplo`, and the `cargo-*` tools) via
+[`.devcontainer/post-create.sh`](.devcontainer/post-create.sh).
+
+The GitHub CLI authenticates by forwarding your host credentials. If you are
+already signed in with `gh` on your machine, `gh` works inside the container
+with no extra steps. Otherwise, run `gh auth login` once inside the container.
+
 ## License
 
 MIT OR Apache-2.0
