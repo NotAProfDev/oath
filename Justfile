@@ -106,6 +106,10 @@ check-large-files:
     done < <(git diff --cached --name-only --diff-filter=ACM)
     exit $fail
 
+# Lint shell scripts: git hooks and devcontainer provisioning.
+shellcheck:
+    shellcheck .githooks/* .devcontainer/*.sh
+
 # Validate a commit-message file against Conventional Commits.
 commit-msg FILE:
     #!/usr/bin/env bash

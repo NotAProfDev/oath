@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+set -euo pipefail
+exec just commit-msg "$1"
