@@ -83,10 +83,10 @@ check-branch:
 check-merge-conflicts:
     #!/usr/bin/env bash
     set -euo pipefail
-    files=$(git diff --cached --name-only --diff-filter=ACM)
-    [[ -z "$files" ]] && exit 0
+    mapfile -d '' -t files < <(git diff --cached --name-only --diff-filter=ACM -z)
+    [[ ${#files[@]} -eq 0 ]] && exit 0
     # {7} avoids embedding a literal marker in this recipe.
-    if grep -EIln '^(<{7}|={7}|>{7})( |$)' $files; then
+    if grep -EIln '^(<{7}|={7}|>{7})( |$)' "${files[@]}"; then
         echo "✗ Merge-conflict markers found in staged files." >&2
         exit 1
     fi
@@ -110,7 +110,7 @@ check-large-files:
 commit-msg FILE:
     #!/usr/bin/env bash
     set -euo pipefail
-    subject=$(grep -vE '^\s*(#|$)' "{{FILE}}" | head -n1)
+    subject=$(grep -vE '^\s*(#|$)' "{{FILE}}" | head -n1 || true)
     [[ "$subject" =~ ^(Merge|Revert) ]] && exit 0
     pattern='^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([a-z0-9 ,./_-]+\))?!?: .+'
     if [[ ! "$subject" =~ $pattern ]]; then
