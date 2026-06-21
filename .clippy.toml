@@ -4,6 +4,10 @@
 # These settings apply workspace-wide. Per-crate overrides can be placed in a
 # crate-local .clippy.toml next to the crate's Cargo.toml.
 
+# Pin Clippy's MSRV so it never suggests APIs newer than our minimum (1.85).
+# Must match rust-version in Cargo.toml's [workspace.package].
+msrv = "1.85"
+
 # Allow unwrap() and expect() inside test functions and #[cfg(test)] modules.
 # This avoids requiring #[allow(clippy::unwrap_used)] in every test block.
 allow-unwrap-in-tests = true
