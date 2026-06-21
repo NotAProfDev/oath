@@ -4,6 +4,8 @@
 # Install: https://just.systems/man/en/packages.html
 # Usage:   just <recipe>  (e.g. `just ci`)
 
+# ── Configuration ─────────────────────────────────────────────────────────────
+
 # Shared scope for the compile/lint recipes.
 SCOPE := "--workspace --all-targets --all-features"
 
@@ -13,6 +15,8 @@ MAX_FILE_SIZE := "5242880"
 # Branches that commits/pushes must never land on directly — work happens on
 # feature branches via PRs. Space-separated; checked by check-branch/check-push.
 PROTECTED_BRANCHES := "main"
+
+# ── Setup ─────────────────────────────────────────────────────────────────────
 
 # List all available recipes (default when running `just` with no arguments).
 [private]
@@ -28,6 +32,8 @@ setup:
     git config core.hooksPath .githooks
     chmod +x .githooks/*
 
+# ── Format & lint ─────────────────────────────────────────────────────────────
+
 # Reject any formatting divergence. Fix with: just fix (or cargo fmt --all)
 fmt:
     cargo fmt --all -- --check
@@ -35,22 +41,6 @@ fmt:
 # Reject any TOML formatting divergence. Fix with: taplo fmt
 fmt-toml:
     taplo fmt --check
-
-# Spell-check the repository (config: _typos.toml).
-typos:
-    typos
-
-# Detect dependencies declared in Cargo.toml but never used.
-machete:
-    cargo machete
-
-# Scan the worktree and history for committed secrets.
-gitleaks:
-    gitleaks detect --no-banner
-
-# Lint GitHub Actions workflow files.
-actionlint:
-    actionlint
 
 # Auto-fix what tooling can: format the workspace and apply Clippy's machine-applicable fixes.
 fix:
@@ -65,6 +55,12 @@ check:
 lint:
     cargo clippy {{SCOPE}} --locked -- -D warnings
 
+# Verify compilation on the declared MSRV. Requires: rustup toolchain install 1.85
+msrv:
+    cargo +1.85 check --workspace --all-targets --all-features
+
+# ── Test ──────────────────────────────────────────────────────────────────────
+
 # Run the full test suite (nextest) plus doctests (nextest does not run them).
 test:
     cargo nextest run --workspace --all-features --locked --no-tests=pass
@@ -74,21 +70,39 @@ test:
 test-no-run:
     cargo nextest run --workspace --all-features --locked --no-run
 
+# ── Static analysis ───────────────────────────────────────────────────────────
+
+# Spell-check the repository (config: _typos.toml).
+typos:
+    typos
+
+# Scan the worktree and history for committed secrets.
+gitleaks:
+    gitleaks detect --no-banner
+
+# Lint GitHub Actions workflow files.
+actionlint:
+    actionlint
+
+# Lint shell scripts: git hooks and devcontainer provisioning.
+shellcheck:
+    shellcheck .githooks/* .devcontainer/*.sh
+
+# ── Supply chain & docs ───────────────────────────────────────────────────────
+
 # Check licenses, bans, advisories, and sources.
 deny:
     cargo deny --all-features check
+
+# Detect dependencies declared in Cargo.toml but never used.
+machete:
+    cargo machete
 
 # Build docs; broken intra-doc links and rustdoc warnings are hard errors.
 doc:
     RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-items --all-features
 
-# Verify compilation on the declared MSRV. Requires: rustup toolchain install 1.85
-msrv:
-    cargo +1.85 check --workspace --all-targets --all-features
-
-# Lint shell scripts: git hooks and devcontainer provisioning.
-shellcheck:
-    shellcheck .githooks/* .devcontainer/*.sh
+# ── Mutation testing ──────────────────────────────────────────────────────────
 
 # Mutation testing — verify the suite actually catches bugs. Slow (minutes+).
 mutants:
@@ -107,8 +121,23 @@ mutants-diff:
     git diff "$base" > target/mutants.diff
     cargo mutants --in-diff target/mutants.diff
 
+# ── Aggregate gates ───────────────────────────────────────────────────────────
+
 # Run the full local CI suite (identical to what .github/workflows/ci.yml invokes).
 ci: fmt fmt-toml typos lint check test deny doc machete gitleaks actionlint shellcheck
+
+# Fast pre-commit gate (called by .githooks/pre-commit).
+pre-commit: check-branch check-merge-conflicts check-large-files fmt fmt-toml typos lint test-no-run
+
+# Full pre-push gate (called by .githooks/pre-push). check-push first so it
+# consumes git's piped ref list before the CI steps run.
+[doc('Full pre-push gate: protected-target check, then the full CI gate.')]
+pre-push: check-push ci
+
+# ── Git-hook internals ────────────────────────────────────────────────────────
+# Building blocks of the pre-commit/pre-push gates above. [private] keeps them out
+# of `just --list`; they are invoked by the aggregate gates, not run by hand
+# (check-push in particular blocks on stdin if run without git's piped ref list).
 
 # Reject commits made directly on a protected branch (see PROTECTED_BRANCHES).
 # A detached HEAD yields an empty name and passes.
@@ -210,6 +239,8 @@ commit-msg FILE:
         exit 1
     fi
 
+# ── Self-tests ────────────────────────────────────────────────────────────────
+
 # Self-test the commit-msg rules: feed known-good/bad subjects through the recipe
 # and assert the exit codes. Run with: just test-commit-msg
 [doc('Self-test the commit-msg rules (asserts exit codes for good/bad subjects).')]
@@ -244,11 +275,3 @@ test-commit-msg:
     expect 1 "feat: $(printf 'x%.0s' {1..80})"
     echo "commit-msg self-test: $pass passed, $fail failed"
     [[ "$fail" -eq 0 ]]
-
-# Fast pre-commit gate (called by .githooks/pre-commit).
-pre-commit: check-branch check-merge-conflicts check-large-files fmt fmt-toml typos lint test-no-run
-
-# Full pre-push gate (called by .githooks/pre-push). check-push first so it
-# consumes git's piped ref list before the CI steps run.
-[doc('Full pre-push gate: protected-target check, then the full CI gate.')]
-pre-push: check-push ci

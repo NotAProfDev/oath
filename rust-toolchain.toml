@@ -5,6 +5,6 @@
 # Pin to the stable channel. Change to "nightly" to enable unstable rustfmt options.
 channel = "stable"
 # Components required for CI and the pre-commit hook (fmt + lint).
-components = ["rustfmt", "clippy"]
+components = ["rustfmt", "clippy", "rust-analyzer"]
 # Download only what is needed; rust-docs and other extras are omitted.
 profile = "minimal"
