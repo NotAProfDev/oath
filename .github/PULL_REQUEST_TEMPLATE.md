@@ -1,3 +1,5 @@
+<!-- New here? See CONTRIBUTING.md for the issue → branch → just ci → PR → squash workflow. -->
+
 ## Description
 
 <!-- What does this PR do and why? Provide context, motivation, and any relevant background. -->
