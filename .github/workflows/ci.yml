@@ -28,10 +28,12 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      # rust-toolchain.toml supplies channel/components; this action honours it.
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
 
+      # Cache registry/git/target keyed by OS + Rust version + Cargo.lock.
       - uses: Swatinem/rust-cache@v2
 
         # Single fast installer for every non-rustc tool the just recipes call.
@@ -39,7 +41,7 @@ jobs:
         # https://github.com/taiki-e/install-action and adjust that one name.
       - uses: taiki-e/install-action@v2
         with:
-          tool: just,cargo-nextest,cargo-deny,cargo-machete,taplo-cli,typos,gitleaks,actionlint,shellcheck
+          tool: just,cargo-nextest,cargo-deny,cargo-machete,taplo-cli,typos-cli,gitleaks,actionlint,shellcheck
 
         # One command — identical to `just ci` run locally and by the pre-push hook.
       - name: ci
