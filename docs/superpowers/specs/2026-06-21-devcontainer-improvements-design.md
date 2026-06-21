@@ -28,7 +28,10 @@ and PRs from inside the container.
   for tools that have no good feature.
 - Features **float to latest** (no version pinning).
 - **MSRV toolchain is out of scope** (`just msrv` stays a host-only concern).
-- **Cargo cache volume is enabled.**
+- **No cargo cache volume / persistent mounts** (kept simple).
+- Rust tooling installed with **`cargo install --locked`** (not `cargo-binstall`), for
+  build-from-source provenance/safety. Accepts slower container creation as the trade-off.
+- **No sccache** (its payoff is limited without a persistent cache).
 - `gh` authentication via **host credential forwarding** (Option A), with manual
   `gh auth login` documented as fallback (Option B). No secrets in the repo.
 
@@ -49,11 +52,11 @@ Each tool is placed where it is most reliable and fastest.
 - `shellcheck` — lints the shell git hooks.
 - `gitleaks` and/or `just` — if not installed via a Tier 1 feature.
 
-### Tier 3 — `cargo-binstall` in `postCreateCommand` (prebuilt Rust binaries)
+### Tier 3 — `cargo install --locked` in `postCreateCommand`
 
-Rationale: `cargo install` compiles each tool from source (minutes per tool on every
-create). `cargo-binstall` downloads prebuilt release binaries (seconds). Install
-`cargo-binstall` first, then use it for:
+Rust tools are installed from source via `cargo install --locked` (consistent with the
+existing `cargo-deny` install). This is slower than downloading prebuilt binaries, but
+is preferred here for build-from-source provenance/safety. Tools:
 
 - `cargo-deny`
 - `cargo-nextest`
@@ -62,20 +65,11 @@ create). `cargo-binstall` downloads prebuilt release binaries (seconds). Install
 - `typos-cli`
 - `taplo-cli`
 - `just-lsp`
-- `sccache`
 
 `actionlint` is installed via its official binary install script (it is a Go tool, not
 a crate).
 
 `postCreateCommand` ends with `just setup` to wire the git hooks, as today.
-
-## Performance & caching
-
-- **Cargo cache volume:** enable the Docker volume mount for `/usr/local/cargo` so
-  dependencies and installed tool binaries survive rebuilds.
-- **sccache:** set `RUSTC_WRAPPER=sccache` via `containerEnv`; persist its cache
-  directory so compilation artifacts survive rebuilds. Verify with `sccache --show-stats`.
-- **cargo-binstall:** avoids from-source compilation of all tooling.
 
 ## Extensions & settings
 
@@ -118,15 +112,15 @@ config.
 
 After a container build/rebuild:
 
-1. Confirm each tool resolves on PATH: `gh`, `shellcheck`, `sccache`, `cargo nextest`,
+1. Confirm each tool resolves on PATH: `gh`, `shellcheck`, `cargo nextest`,
    `typos`, `taplo`, `just-lsp`, `actionlint`, `cargo deny`, `cargo mutants`, `cargo machete`.
 2. Confirm `just ci` still passes (CI parity).
-3. Confirm `sccache --show-stats` shows the wrapper is active.
-4. Confirm `gh auth status` reports authenticated (when host is authed).
+3. Confirm `gh auth status` reports authenticated (when host is authed).
 
 ## Out of scope / follow-ups
 
 - MSRV toolchain installation in-container.
+- Cargo cache volume / persistent mounts and `sccache` (intentionally excluded).
 - Wiring `shellcheck`/`typos` into the `pre-commit` hook (flagged as a follow-up, not
   part of this change).
 - Version-pinning features.
