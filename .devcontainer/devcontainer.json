@@ -19,9 +19,8 @@
 			"moby": false
 		}
 	},
-	// Install system libraries needed by build scripts (e.g. bindgen/libclang for iceoryx2),
-	// install just, cargo-deny, and gitleaks, then activate the git hooks.
-	"postCreateCommand": "sudo apt-get update && sudo apt-get install -y libclang-dev gitleaks just && sudo rm -rf /var/lib/apt/lists/* && cargo install --locked cargo-deny && just setup",
+	// Provision the container (tools + git hooks). See .devcontainer/post-create.sh.
+	"postCreateCommand": "bash .devcontainer/post-create.sh",
 	// Configure tool-specific properties.
 	"customizations": {
 		"vscode": {
@@ -29,7 +28,8 @@
 				"rust-lang.rust-analyzer",
 				"fill-labs.dependi",
 				"tamasfe.even-better-toml",
-				"github.vscode-github-actions"
+				"github.vscode-github-actions",
+				"anthropic.claude-code"
 			],
 			"settings": {
 				// Use clippy instead of plain check so inline diagnostics match CI.
