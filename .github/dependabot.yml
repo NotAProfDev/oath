@@ -2,11 +2,11 @@
 # Full reference: https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
 #
 # Opens weekly PRs for outdated dependencies across all three package ecosystems.
-# Cargo.lock is gitignored (library convention), so Dependabot targets Cargo.toml
-# version constraints directly.
+# Cargo.lock is committed and every CI/just recipe runs with `--locked`, so the
+# cargo updates refresh both the Cargo.toml constraints and the Cargo.lock entries.
 version: 2
 updates:
-  # Rust crate dependencies — targets version constraints in Cargo.toml files.
+  # Rust crate dependencies — updates Cargo.toml constraints and the committed Cargo.lock.
   - package-ecosystem: cargo
     directory: /
     schedule:
