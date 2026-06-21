@@ -47,8 +47,6 @@ body:
       description: Describe the feature or change you have in mind. If possible, include a minimal code example or mockup.
       placeholder: |
         (Optional) Paste a minimal code snippet or example here
-    validations:
-      required: true
 
   - type: textarea
     id: acceptance-criteria
@@ -59,8 +57,6 @@ body:
         - [ ] User can place an order via the REST API
         - [ ] Order is persisted in the database before acknowledgment
         - [ ] Risk checks run before execution
-    validations:
-      required: true
 
   - type: textarea
     id: scope
@@ -83,12 +79,27 @@ body:
       description: Link to the implementation plan at docs/superpowers/plans/<slug>.md (created with the writing-plans skill). If not yet created, leave blank.
       placeholder: "docs/superpowers/plans/order-lifecycle.md"
 
-  - type: textarea
-    id: affected-crates
+  - type: dropdown
+    id: area
     attributes:
-      label: Affected crates
-      description: Which OATH crates will this feature touch? (oath-model, oath-net-core, oath-messaging-core, oath-persistence-core, oath-ingest-core, oath-execution-core, oath-portfolio-core, oath-risk-core, oath-strategy-core, oath-engine)
-      placeholder: "oath-model, oath-execution-core"
+      label: Affected area
+      description: Best-guess crate or subsystem. A maintainer applies the matching label during triage.
+      options:
+        - "Unsure / other"
+        - "oath-model"
+        - "oath-net"
+        - "oath-messaging"
+        - "oath-persistence"
+        - "oath-ingest"
+        - "oath-execution"
+        - "oath-portfolio"
+        - "oath-risk"
+        - "oath-strategy"
+        - "oath-engine"
+        - "tooling / CI"
+        - "docs"
+    validations:
+      required: false
 
   - type: textarea
     id: alternatives
