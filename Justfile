@@ -17,6 +17,26 @@ setup:
 fmt:
     cargo fmt --all -- --check
 
+# Reject any TOML formatting divergence. Fix with: taplo fmt
+fmt-toml:
+    taplo fmt --check
+
+# Spell-check the repository (config: _typos.toml).
+typos:
+    typos
+
+# Detect dependencies declared in Cargo.toml but never used.
+machete:
+    cargo machete
+
+# Scan the worktree and history for committed secrets.
+gitleaks:
+    gitleaks detect --no-banner
+
+# Lint GitHub Actions workflow files.
+actionlint:
+    actionlint
+
 # Type-check every crate and target without codegen.
 check:
     cargo check --workspace --all-targets --all-features
@@ -25,9 +45,14 @@ check:
 lint:
     cargo clippy --workspace --all-targets --all-features -- -D warnings
 
-# Run the full test suite.
+# Run the full test suite (nextest) plus doctests (nextest does not run them).
 test:
-    cargo test --workspace --all-features
+    cargo nextest run --workspace --all-features --no-tests=pass
+    cargo test --workspace --all-features --doc
+
+# Compile all tests without running them — the fast pre-commit gate.
+test-no-run:
+    cargo nextest run --workspace --all-features --no-run
 
 # Check licenses, bans, advisories, and sources.
 deny:

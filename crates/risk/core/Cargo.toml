@@ -13,3 +13,12 @@ oath-model = { workspace = true }
 oath-execution-core = { workspace = true }
 oath-portfolio-core = { workspace = true }
 thiserror = { workspace = true }
+
+# Scaffold crate: deps are declared ahead of implementation; suppress false positives.
+[package.metadata.cargo-machete]
+ignored = [
+  "oath-execution-core",
+  "oath-model",
+  "oath-portfolio-core",
+  "thiserror",
+]

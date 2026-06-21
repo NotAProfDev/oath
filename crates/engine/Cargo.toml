@@ -19,3 +19,18 @@ oath-portfolio-core = { workspace = true }
 oath-risk-core = { workspace = true }
 oath-strategy-core = { workspace = true }
 tokio = { workspace = true }
+
+# Scaffold crate: deps are declared ahead of implementation; suppress false positives.
+[package.metadata.cargo-machete]
+ignored = [
+  "oath-execution-core",
+  "oath-ingest-core",
+  "oath-messaging-core",
+  "oath-model",
+  "oath-net-core",
+  "oath-persistence-core",
+  "oath-portfolio-core",
+  "oath-risk-core",
+  "oath-strategy-core",
+  "tokio",
+]
