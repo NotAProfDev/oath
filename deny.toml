@@ -13,6 +13,8 @@ all-features = true
 # Checks the RustSec advisory database for known vulnerabilities, unmaintained
 # crates, and yanked versions.
 [advisories]
+# Opt into the v2 schema; avoids a deprecation warning and pins the behavior.
+version = 2
 # Yanked versions should never be in a lockfile.
 # (Default: "warn")
 yanked = "deny"
@@ -30,6 +32,8 @@ ignore = []
 # Allowlist approach: any license not listed here causes a hard failure.
 # All identifiers are SPDX expressions; add entries deliberately with rationale.
 [licenses]
+# Opt into the v2 schema; avoids a deprecation warning and pins the behavior.
+version = 2
 # Minimum confidence for automated license file detection; below this threshold
 # the license is treated as unknown and the check fails.
 # (Default: 0.8)
@@ -55,6 +59,10 @@ ignore = true
 # --- Bans ---
 # Detects duplicate dependency versions and wildcard version requirements.
 [bans]
+# Duplicate versions of a crate bloat the build; transitive duplicates are
+# outside our direct control, so warn rather than fail (see `skip` below).
+# (Default: "warn")
+multiple-versions = "warn"
 # Wildcard requirements (e.g. `foo = "*"`) are never acceptable in production.
 # (Default: "warn")
 wildcards = "deny"

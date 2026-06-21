@@ -1,3 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
+if ! command -v just >/dev/null 2>&1; then
+    echo "pre-push: 'just' not found — refusing to push (fail closed)." >&2
+    echo "  Install just (https://just.systems) or re-enter the devcontainer." >&2
+    exit 1
+fi
 exec just pre-push

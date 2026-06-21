@@ -2,7 +2,7 @@
 # Full reference: https://doc.rust-lang.org/cargo/reference/workspaces.html
 
 [workspace]
-resolver = "2"
+resolver = "3"
 members = [
   "crates/model",
   "crates/net/core",
@@ -57,17 +57,27 @@ tracing = "0.1"
 # Centralized lint configuration inherited by all workspace crates via `[lints] workspace = true`.
 # Full reference: https://doc.rust-lang.org/cargo/reference/workspaces.html#the-lints-table
 [workspace.lints.rust]
+# Memory safety is a core requirement for a financial engine — deny unsafe
+# workspace-wide. A crate that genuinely needs FFI overrides this in its own
+# `[lints]` table, with justification — denied by default, escapable on purpose.
+unsafe_code = "deny"
 unused_imports = "warn"
 dead_code = "warn"
 missing_docs = "warn"
-rust_2018_idioms = "warn"
+# Flag `pub` items that aren't actually reachable outside the crate.
+unreachable_pub = "warn"
+# Modern idioms — a lint *group*, so it needs `priority = -1` to stay below the
+# individual lints above (a targeted lint / `#[allow(...)]` always wins).
+rust_2018_idioms = { level = "warn", priority = -1 }
 missing_debug_implementations = "warn"
 
 [workspace.lints.clippy]
-all = "warn"
-pedantic = "warn"
-nursery = "warn"
-cargo = "warn"
+# Lint groups. `priority = -1` keeps each group below the individual lints further
+# down, so a targeted lint / `#[allow(...)]` / per-crate override always wins.
+all = { level = "deny", priority = -1 }      # correctness, suspicious, style, complexity, perf — hard error
+pedantic = { level = "warn", priority = -1 } # broader, occasionally noisy guidance — visible, non-blocking
+nursery = { level = "warn", priority = -1 }  # newer, still-stabilizing lints — advisory
+cargo = { level = "warn", priority = -1 }    # manifest hygiene (feature names, wildcard deps, …)
 # Internal workspace crates are not published to crates.io
 cargo_common_metadata = { level = "allow", priority = 1 }
 # Transitive deps may carry duplicate versions outside our control
