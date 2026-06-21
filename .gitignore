@@ -37,7 +37,6 @@ target/
 .claude/
 # Superpowers plugin artifacts
 .superpowers/
-docs/.superpowers/
 
 ### OS/Misc ###
 .DS_Store
