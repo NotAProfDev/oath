@@ -28,10 +28,26 @@
 	"customizations": {
 		"vscode": {
 			"extensions": [
+				// Rust
 				"rust-lang.rust-analyzer",
+				"vadimcn.vscode-lldb",
 				"fill-labs.dependi",
+				// Config / formats
 				"tamasfe.even-better-toml",
+				"editorconfig.editorconfig",
+				"mikestead.dotenv",
+				"davidanson.vscode-markdownlint",
+				// Spell-check (same `typos` engine/config as CLI + CI)
+				"tekumara.typos-vscode",
+				// Diagnostics
+				"usernamehw.errorlens",
+				// Git / GitHub
+				"eamodio.gitlens",
 				"github.vscode-github-actions",
+				"github.vscode-pull-request-github",
+				// Docker (docker-outside-of-docker feature)
+				"ms-azuretools.vscode-docker",
+				// Claude Code
 				"anthropic.claude-code"
 			],
 			"settings": {
