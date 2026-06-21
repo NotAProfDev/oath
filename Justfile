@@ -68,3 +68,55 @@ msrv:
 
 # Run the full local CI suite (matches .github/workflows/ci.yml).
 ci: fmt lint test deny doc
+
+# Reject commits made directly on the protected 'main' branch.
+check-branch:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    branch=$(git rev-parse --abbrev-ref HEAD)
+    if [[ "$branch" == "main" ]]; then
+        echo "✗ Direct commits to 'main' are not allowed; use a feature branch." >&2
+        exit 1
+    fi
+
+# Reject staged files that contain merge-conflict markers.
+check-merge-conflicts:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    files=$(git diff --cached --name-only --diff-filter=ACM)
+    [[ -z "$files" ]] && exit 0
+    # {7} avoids embedding a literal marker in this recipe.
+    if grep -EIln '^(<{7}|={7}|>{7})( |$)' $files; then
+        echo "✗ Merge-conflict markers found in staged files." >&2
+        exit 1
+    fi
+
+# Reject staged files larger than 5 MiB.
+check-large-files:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    max=5242880  # 5 MiB
+    fail=0
+    while IFS= read -r f; do
+        size=$(git cat-file -s ":$f" 2>/dev/null || echo 0)
+        if (( size > max )); then
+            echo "✗ $f is $((size / 1048576)) MiB (limit 5 MiB)." >&2
+            fail=1
+        fi
+    done < <(git diff --cached --name-only --diff-filter=ACM)
+    exit $fail
+
+# Validate a commit-message file against Conventional Commits.
+commit-msg FILE:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    subject=$(grep -vE '^\s*(#|$)' "{{FILE}}" | head -n1)
+    [[ "$subject" =~ ^(Merge|Revert) ]] && exit 0
+    pattern='^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([a-z0-9 ,./_-]+\))?!?: .+'
+    if [[ ! "$subject" =~ $pattern ]]; then
+        echo "✗ Commit message is not a valid Conventional Commit:" >&2
+        echo "    $subject" >&2
+        echo "  Expected: <type>(<scope>)?: <description>" >&2
+        echo "  Types: feat fix docs style refactor perf test build ci chore revert" >&2
+        exit 1
+    fi
