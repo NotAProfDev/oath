@@ -36,5 +36,11 @@ Cargo.lock
 # IntelliJ
 .idea/
 
+### AI tooling ###
+# Claude Code local config, skills, and session data
+.claude/
+# Superpowers plugin artifacts
+.superpowers/
+
 ### OS/Misc ###
 .DS_Store
