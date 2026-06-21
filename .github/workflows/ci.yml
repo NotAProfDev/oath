@@ -28,53 +28,30 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-        # dtolnay/rust-toolchain reads rust-toolchain.toml automatically,
-        # so the channel, components, and profile are sourced from that file.
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
 
-        # Cache ~/.cargo/registry, ~/.cargo/git, and target/ keyed by OS,
-        # Rust version, and Cargo.lock — typically 5–10× faster on cache hits.
       - uses: Swatinem/rust-cache@v2
 
-        # Reject any formatting divergence; must pass before heavier checks.
-      - name: fmt
-        run: cargo fmt --all -- --check
+        # Single fast installer for every non-rustc tool the just recipes call.
+        # If a tool name errors, check the supported list at
+        # https://github.com/taiki-e/install-action and adjust that one name.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just,cargo-nextest,cargo-deny,cargo-machete,taplo-cli,typos,gitleaks,actionlint,shellcheck
 
-        # Type-check every crate and target (bins, tests, benches) without codegen.
-      - name: check
-        run: cargo check --workspace --all-targets --all-features
+        # One command — identical to `just ci` run locally and by the pre-push hook.
+      - name: ci
+        run: just ci
 
-        # Lint every crate and target; -D warnings turns all warnings into hard failures.
-      - name: clippy
-        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
-
-        # Run the full test suite.
-      - name: test
-        run: cargo test --workspace --all-features
-
-        # Build docs for all workspace crates. RUSTDOCFLAGS catches broken intra-doc
-        # links and other rustdoc warnings. RUSTFLAGS is intentionally omitted —
-        # [workspace.lints.rust] already promotes rustc warnings to errors for our
-        # crates without affecting dependencies or busting the Swatinem cache key.
-      - name: doc
-        run: cargo doc --workspace --no-deps --document-private-items --all-features
-        env:
-          RUSTDOCFLAGS: "-D warnings"
-
-        # Upload the generated HTML docs as a workflow artifact (viewable in the
-        # Actions UI; kept for 7 days to avoid burning the default 90-day quota).
+        # `just ci` runs `cargo doc`; publish the generated HTML.
       - name: upload docs
         uses: actions/upload-artifact@v7
         with:
           name: docs
           path: target/doc
           retention-days: 7
-
-        # Audit licenses, advisories, bans, and sources against deny.toml.
-      - name: deny
-        uses: EmbarkStudios/cargo-deny-action@v2
 
   # Verify that the codebase compiles on the declared minimum supported Rust
   # version. rust-version = "1.85" in Cargo.toml is metadata only — without
@@ -97,7 +74,9 @@ jobs:
         with:
           key: msrv
 
-        # Only check compilation — no clippy (it may introduce post-MSRV lints)
-        # and no tests (test harness APIs may differ across Rust versions).
-      - name: check
-        run: cargo check --workspace --all-targets --all-features
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just
+
+      - name: msrv
+        run: just msrv
