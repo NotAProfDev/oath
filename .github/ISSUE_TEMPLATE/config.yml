@@ -3,3 +3,6 @@ contact_links:
   - name: 💬 GitHub Discussions
     url: https://github.com/NotAProfDev/oath/discussions
     about: Ask questions and discuss ideas here
+  - name: 📖 Contributing guide
+    url: https://github.com/NotAProfDev/oath/blob/main/CONTRIBUTING.md
+    about: Dev workflow, build/test, and code standards — read this before opening a PR.
