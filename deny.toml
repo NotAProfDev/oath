@@ -74,8 +74,11 @@ deny = []
 # Review and prune this list whenever major dependencies are upgraded.
 skip = [
   # uuid -> getrandom -> wasip2 (0.57.1) and wasip3 (0.51.0) pull in different
-  # wit-bindgen versions; both are transitive and outside our control.
-  { name = "wit-bindgen" },
+  # wit-bindgen versions; both are transitive and outside our control. Pinning the
+  # versions makes cargo-deny warn once these entries are stale, rather than
+  # silently masking a future, unrelated duplicate.
+  { name = "wit-bindgen", version = "=0.51.0" },
+  { name = "wit-bindgen", version = "=0.57.1" },
 ]
 
 # --- Sources ---

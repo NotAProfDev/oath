@@ -82,8 +82,9 @@ cargo = { level = "warn", priority = -1 }    # manifest hygiene (feature names, 
 cargo_common_metadata = { level = "allow", priority = 1 }
 # Transitive deps may carry duplicate versions outside our control
 multiple_crate_versions = { level = "allow", priority = 1 }
-# In the restriction group (not covered by `all`) — catches leftover dbg!() calls
-dbg_macro = "warn"
+# In the restriction group (not covered by `all`) — a committed dbg!() is always
+# a mistake, so block it outright rather than merely warning.
+dbg_macro = "deny"
 # Panicking in a function that returns Result is always a bug.
 panic_in_result_fn = "warn"
 # Enforce explicit error handling — no silent panics from unwrap/expect/indexing.
@@ -103,6 +104,10 @@ indexing_slicing = "warn"
 #   opt-level=0  debug=true  overflow-checks=true  debug-assertions=true
 #   incremental=true  codegen-units=256  panic="unwind"
 [profile.release]
+# (Default: false) — keep arithmetic overflow checks on even in release. A silent
+# wraparound in financial math is a correctness bug, not a performance trade-off
+# worth making; the overhead is negligible relative to the safety it buys.
+overflow-checks = true
 # (Default: false) — whole-program optimization for maximum runtime performance.
 lto = "fat"
 # (Default: 16) — single codegen unit required for full LTO effectiveness.
