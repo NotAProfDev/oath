@@ -37,6 +37,8 @@
 				"editorconfig.editorconfig",
 				"mikestead.dotenv",
 				"davidanson.vscode-markdownlint",
+				// Just (justfile syntax highlighting)
+				"nefrob.vscode-just-syntax",
 				// Spell-check (same `typos` engine/config as CLI + CI)
 				"tekumara.typos-vscode",
 				// Diagnostics
