@@ -1,0 +1,14 @@
+# Shared typos configuration for the OATH repo.
+# Consumed by the `typos` CLI (run manually, and by future git-hook/CI
+# integration) and by the tekumara.typos-vscode editor extension, so
+# spell-checking is identical in the editor and on the command line.
+# Reference: https://github.com/crate-ci/typos/blob/master/docs/reference.md
+
+[files]
+# Generated or vendored files we never spell-check.
+extend-exclude = ["Cargo.lock", "target/"]
+
+[default.extend-words]
+# Project-specific terms / acronyms that are valid (map each word to itself).
+# Add an entry here whenever `typos` reports a false positive.
+oath = "oath"
