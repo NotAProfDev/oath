@@ -1,6 +1,7 @@
 // For format details, see https://aka.ms/devcontainer.json. For config options, see the
 // README at: https://github.com/devcontainers/templates/tree/main/src/rust
 {
+	"$schema": "https://raw.githubusercontent.com/devcontainers/spec/main/schemas/devContainer.schema.json",
 	"name": "Rust",
 	// Or use a Dockerfile or Docker Compose file. More info: https://containers.dev/guide/dockerfile
 	"image": "mcr.microsoft.com/devcontainers/rust:2-1-trixie",
@@ -22,6 +23,8 @@
 		// container automatically; run `gh auth login` if not authed on host.
 		"ghcr.io/devcontainers/features/github-cli:1": {}
 	},
+	// Run as the non-root user provided by the base image.
+	"remoteUser": "vscode",
 	// Provision the container (tools + git hooks). See .devcontainer/post-create.sh.
 	"postCreateCommand": "bash .devcontainer/post-create.sh",
 	// Configure tool-specific properties.
@@ -54,7 +57,14 @@
 			],
 			"settings": {
 				// Use clippy instead of plain check so inline diagnostics match CI.
-				"rust-analyzer.check.command": "clippy"
+				"rust-analyzer.check.command": "clippy",
+				// Format on save; Rust is handled by rust-analyzer (rustfmt).
+				"editor.formatOnSave": true,
+				"terminal.integrated.defaultProfile.linux": "bash",
+				// Pin the TOML formatter so formatOnSave is deterministic.
+				"[toml]": {
+					"editor.defaultFormatter": "tamasfe.even-better-toml"
+				}
 			}
 		}
 	}
