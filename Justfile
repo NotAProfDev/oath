@@ -66,8 +66,8 @@ doc:
 msrv:
     cargo +1.85 check --workspace --all-targets --all-features
 
-# Run the full local CI suite (matches .github/workflows/ci.yml).
-ci: fmt lint test deny doc
+# Run the full local CI suite (identical to what .github/workflows/ci.yml invokes).
+ci: fmt fmt-toml typos lint check test deny doc machete gitleaks actionlint shellcheck
 
 # Reject commits made directly on the protected 'main' branch.
 check-branch:
@@ -124,3 +124,9 @@ commit-msg FILE:
         echo "  Types: feat fix docs style refactor perf test build ci chore revert" >&2
         exit 1
     fi
+
+# Fast pre-commit gate (called by .githooks/pre-commit).
+pre-commit: check-branch check-merge-conflicts check-large-files fmt fmt-toml typos lint test-no-run
+
+# Full pre-push gate (called by .githooks/pre-push).
+pre-push: ci
