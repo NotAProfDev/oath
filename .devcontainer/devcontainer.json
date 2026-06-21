@@ -17,7 +17,10 @@
 	"features": {
 		"ghcr.io/devcontainers/features/docker-outside-of-docker:1": {
 			"moby": false
-		}
+		},
+		// GitHub CLI. VS Code forwards host `gh` credentials into the
+		// container automatically; run `gh auth login` if not authed on host.
+		"ghcr.io/devcontainers/features/github-cli:1": {}
 	},
 	// Provision the container (tools + git hooks). See .devcontainer/post-create.sh.
 	"postCreateCommand": "bash .devcontainer/post-create.sh",
