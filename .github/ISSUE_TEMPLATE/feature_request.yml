@@ -66,7 +66,7 @@ body:
     id: scope
     attributes:
       label: In scope
-      description: What this PRD explicitly covers.
+      description: What this feature explicitly covers.
       placeholder: "Order placement via REST API, database persistence, risk pre-check"
 
   - type: textarea
@@ -80,14 +80,14 @@ body:
     id: plan_link
     attributes:
       label: Implementation Plan
-      description: Link to the implementation plan at .claude/plans/<slug>.md (created by /plan-feature). If not yet created, leave blank.
-      placeholder: ".claude/plans/order-lifecycle.md"
+      description: Link to the implementation plan at docs/superpowers/plans/<slug>.md (created with the writing-plans skill). If not yet created, leave blank.
+      placeholder: "docs/superpowers/plans/order-lifecycle.md"
 
   - type: textarea
     id: affected-crates
     attributes:
       label: Affected crates
-      description: Which OATH crates will this feature touch? (model, net/core, messaging/core, persistence/core, ingest/core, execution/core, portfolio/core, risk/core, strategy/core, engine)
+      description: Which OATH crates will this feature touch? (oath-model, oath-net-core, oath-messaging-core, oath-persistence-core, oath-ingest-core, oath-execution-core, oath-portfolio-core, oath-risk-core, oath-strategy-core, oath-engine)
       placeholder: "oath-model, oath-execution-core"
 
   - type: textarea
