@@ -97,13 +97,13 @@ check-large-files:
     set -euo pipefail
     max=5242880  # 5 MiB
     fail=0
-    while IFS= read -r f; do
+    while IFS= read -r -d '' f; do
         size=$(git cat-file -s ":$f" 2>/dev/null || echo 0)
         if (( size > max )); then
             echo "✗ $f is $((size / 1048576)) MiB (limit 5 MiB)." >&2
             fail=1
         fi
-    done < <(git diff --cached --name-only --diff-filter=ACM)
+    done < <(git diff --cached --name-only --diff-filter=ACM -z)
     exit $fail
 
 # Lint shell scripts: git hooks and devcontainer provisioning.

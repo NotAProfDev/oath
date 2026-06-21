@@ -212,14 +212,24 @@ Reference: [just manual](https://just.systems/man/en/) | [Conventional Commits 1
 
 ### Gaps to fix in Task 8
 
-1. **`.clippy.toml` — missing `msrv`**: Add `msrv = "1.85"` to align with `workspace.package.rust-version`.
-2. **`Cargo.toml` — `profile.release.overflow-checks`**: Consider enabling `overflow-checks = true` in release for a financial/trading engine (evaluate trade-off vs. performance).
-3. **`deny.toml` — `bans.skip` version constraint**: Add version constraint to `{ name = "wit-bindgen" }` skip entry so cargo-deny can warn when the entry becomes stale.
-4. **`_typos.toml` / `Justfile` — typos not wired into CI or task runner**: Add `just typos` recipe and a `typos` step in `ci.yml`; include `typos` in `just ci` aggregate.
-5. **`Justfile` — `just ci` diverges from remote CI**: Add `check` step to `just ci` (and `typos` once wired); `just ci` should mirror `ci.yml` exactly.
-6. **`ci.yml` — action versions use mutable tags**: Pin all five external actions to full commit SHAs with version comments (supply-chain hardening).
-7. **`ci.yml` — MSRV job uses raw `cargo check`**: Replace with `just msrv` so local and CI MSRV checks stay in sync.
-8. **`git hooks` — `.githooks/` directory absent**: Recreate `.githooks/` with at minimum a `pre-commit` hook running `cargo fmt --check` and `typos`, and a `commit-msg` hook enforcing Conventional Commits format.
+1. **`.clippy.toml` — missing `msrv`**: Add `msrv = "1.85"` to align with `workspace.package.rust-version`. ✅ Implemented.
+2. **`Cargo.toml` — `profile.release.overflow-checks`**: Consider enabling `overflow-checks = true` in release for a financial/trading engine (evaluate trade-off vs. performance). _(Deferred — see below.)_
+3. **`deny.toml` — `bans.skip` version constraint**: Add version constraint to `{ name = "wit-bindgen" }` skip entry so cargo-deny can warn when the entry becomes stale. _(Deferred — see below.)_
+4. **`_typos.toml` / `Justfile` — typos not wired into CI or task runner**: Add `just typos` recipe and a `typos` step in `ci.yml`; include `typos` in `just ci` aggregate. ✅ Implemented.
+5. **`Justfile` — `just ci` diverges from remote CI**: Add `check` step to `just ci` (and `typos` once wired); `just ci` should mirror `ci.yml` exactly. ✅ Implemented.
+6. **`ci.yml` — action versions use mutable tags**: Pin all five external actions to full commit SHAs with version comments (supply-chain hardening). _(Deferred — see below.)_
+7. **`ci.yml` — MSRV job uses raw `cargo check`**: Replace with `just msrv` so local and CI MSRV checks stay in sync. ✅ Implemented.
+8. **`git hooks` — `.githooks/` directory absent**: Recreate `.githooks/` with at minimum a `pre-commit` hook running `cargo fmt --check` and `typos`, and a `commit-msg` hook enforcing Conventional Commits format. ✅ Implemented.
+
+### Deferred (not implemented in this change)
+
+- **`profile.release.overflow-checks` (Cargo.toml)**: Deferred pending an explicit perf/risk decision for the trading engine; enabling integer-overflow trapping in release builds affects performance and requires a deliberate benchmark-guided call. Tracked for a future change.
+- **`deny.toml` `bans.skip` wit-bindgen lacks a version constraint**: Deferred; adding a pinned version is only meaningful once the transitive duplicate is pruned (otherwise any version constraint will be stale immediately). Revisit when the wit-bindgen version conflict is resolved.
+- **GitHub Actions SHA-pinning of third-party actions**: Deferred; version-pinning and Dependabot automation were declared out-of-scope in the design. A dedicated supply-chain hardening change should tackle all five actions together with a Dependabot config update.
+
+### Implementation notes
+
+- `just test` uses `cargo nextest run --workspace --all-features --no-tests=pass` — the `--no-tests=pass` flag was added beyond the design's recipe text because nextest exits non-zero on a zero-test workspace; remove the flag once real tests exist if desired.
 
 ### Intentional deviations (kept)
 
