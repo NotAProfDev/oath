@@ -31,11 +31,12 @@ duplicating them.
 - **Local clone:** run `just setup` once to point Git at `.githooks` and make the
   hooks executable. Run `just --list` to see every recipe.
 
-The Rust toolchain is pinned in [`rust-toolchain.toml`](rust-toolchain.toml) — the
-`stable` channel with the `rustfmt`, `clippy`, and `rust-analyzer` components.
-`rustup` installs it automatically the first time you run a `cargo` command in the
-repo, so there's no manual setup. Treat a channel or version bump as a deliberate,
-reviewed change.
+The Rust toolchain is pinned in [`rust-toolchain.toml`](rust-toolchain.toml) — Rust
+`1.96.0` with the `rustfmt`, `clippy`, and `rust-analyzer` components. `rustup`
+installs it automatically the first time you run a `cargo` command in the repo, so
+there's no manual setup. Treat a version bump as a deliberate, reviewed change, and
+keep it in sync with the devcontainer base image (`rust:<version>-trixie`) and the
+`dtolnay/rust-toolchain` ref in CI.
 
 ## Commands
 

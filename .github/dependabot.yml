@@ -42,9 +42,9 @@ updates:
         update-types: ["minor", "patch"]
     ignore:
       # dtolnay/rust-toolchain uses the @ref as the Rust version to install,
-      # not as a semver action release. @stable always resolves to latest stable
-      # (no update needed), and @1.90 is our intentional MSRV pin (must only
-      # change when we deliberately raise the MSRV — not via Dependabot).
+      # not as a semver action release. Both refs are intentional Rust-version
+      # pins — @1.96.0 mirrors rust-toolchain.toml, @1.90 is the MSRV pin — and
+      # must change only via a deliberate, reviewed bump, never via Dependabot.
       - dependency-name: "dtolnay/rust-toolchain"
 
   # Dev container features — updates feature versions in devcontainer.json and
