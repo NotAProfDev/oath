@@ -33,7 +33,7 @@ jobs:
       # Preserve ANSI colour codes in cargo output for readable Actions logs.
       CARGO_TERM_COLOR: always
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           # CI never pushes; don't persist the token in .git/config.
           persist-credentials: false
@@ -99,7 +99,7 @@ jobs:
     env:
       CARGO_TERM_COLOR: always
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
