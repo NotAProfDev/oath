@@ -1,73 +1,98 @@
 // For format details, see https://aka.ms/devcontainer.json. For config options, see the
 // README at: https://github.com/devcontainers/templates/tree/main/src/rust
 {
-	"$schema": "https://raw.githubusercontent.com/devcontainers/spec/main/schemas/devContainer.schema.json",
-	"name": "Rust",
-	// Or use a Dockerfile or Docker Compose file. More info: https://containers.dev/guide/dockerfile
-	"image": "mcr.microsoft.com/devcontainers/rust:2-1-trixie",
-	// Use 'mounts' to make the cargo cache persistent in a Docker Volume.
-	// "mounts": [
-	// 	{
-	// 		"source": "devcontainer-cargo-cache-${devcontainerId}",
-	// 		"target": "/usr/local/cargo",
-	// 		"type": "volume"
-	// 	}
-	// ]
-	// Enables `docker` CLI inside the devcontainer by mounting the host's
-	// Docker socket.  Sibling containers run on the host engine, not nested.
-	"features": {
-		"ghcr.io/devcontainers/features/docker-outside-of-docker:1": {
-			"moby": false
-		},
-		// GitHub CLI. VS Code forwards host `gh` credentials into the
-		// container automatically; run `gh auth login` if not authed on host.
-		"ghcr.io/devcontainers/features/github-cli:1": {}
-	},
-	// Run as the non-root user provided by the base image.
-	"remoteUser": "vscode",
-	// Provision the container (tools + git hooks). See .devcontainer/post-create.sh.
-	"postCreateCommand": "bash .devcontainer/post-create.sh",
-	// Configure tool-specific properties.
-	"customizations": {
-		"vscode": {
-			"extensions": [
-				// Rust
-				"rust-lang.rust-analyzer",
-				"vadimcn.vscode-lldb",
-				"fill-labs.dependi",
-				// Config / formats
-				"tamasfe.even-better-toml",
-				"editorconfig.editorconfig",
-				"mikestead.dotenv",
-				"davidanson.vscode-markdownlint",
-				// Just (justfile syntax highlighting)
-				"nefrob.vscode-just-syntax",
-				// Spell-check (same `typos` engine/config as CLI + CI)
-				"tekumara.typos-vscode",
-				// Diagnostics
-				"usernamehw.errorlens",
-				// Git / GitHub
-				"eamodio.gitlens",
-				"github.vscode-github-actions",
-				"github.vscode-pull-request-github",
-				// Docker (docker-outside-of-docker feature)
-				"ms-azuretools.vscode-docker",
-				// Claude Code
-				"anthropic.claude-code"
-			],
-			"settings": {
-				// Use clippy instead of plain check so inline diagnostics match CI.
-				"rust-analyzer.check.command": "clippy",
-				// Format on save; Rust is handled by rust-analyzer (rustfmt).
-				"editor.formatOnSave": true,
-				"terminal.integrated.defaultProfile.linux": "bash",
-				// Pin the TOML formatter so formatOnSave is deterministic.
-				"[toml]": {
-					"editor.defaultFormatter": "tamasfe.even-better-toml"
-				}
-			}
-		}
-	}
-	// Uncomment to connect as root instead. More info: https://aka.ms/dev-containers-non-root.
-	// "remoteUser": "root"
+  "$schema": "https://raw.githubusercontent.com/devcontainers/spec/main/schemas/devContainer.schema.json",
+  "name": "Rust",
+  // Official Rust image pinned to an EXACT version (not the floating `1-trixie`
+  // tag that mcr.microsoft.com/devcontainers/rust tracks), so the container ships
+  // the same Rust as rust-toolchain.toml and CI — one toolchain, no drift. Bump
+  // in lockstep with rust-toolchain.toml and the dtolnay ref in ci.yml.
+  "image": "rust:1.96.0-trixie",
+  // Use 'mounts' to make the cargo cache persistent in a Docker Volume.
+  // "mounts": [
+  // 	{
+  // 		"source": "devcontainer-cargo-cache-${devcontainerId}",
+  // 		"target": "/usr/local/cargo",
+  // 		"type": "volume"
+  // 	}
+  // ]
+  "features": {
+    // The official rust:<version> image runs as root with a minimal toolchain.
+    // common-utils + rust recreate the non-root dev setup that
+    // mcr.microsoft.com/devcontainers/rust bakes in, but against our pinned base.
+    // Creates the non-root `vscode` user (uid/gid 1000) and installs sudo.
+    "ghcr.io/devcontainers/features/common-utils:2": {
+      "username": "vscode",
+      "userUid": "1000",
+      "userGid": "1000",
+      "installZsh": false,
+      "upgradePackages": true
+    },
+    // Pinned to the base image's Rust version so rustup is idempotent (no second
+    // toolchain). Grants `vscode` group-write on CARGO_HOME/RUSTUP_HOME (so
+    // post-create's `cargo install` works) and adds rustfmt, clippy, rust-analyzer.
+    "ghcr.io/devcontainers/features/rust:1": {
+      "version": "1.96.0"
+    },
+    // Build a newer git from source than Debian trixie's apt ships (2.47.x).
+    "ghcr.io/devcontainers/features/git:1": {
+      "version": "latest",
+      "ppa": false
+    },
+    // Enables `docker` CLI inside the devcontainer by mounting the host's
+    // Docker socket. Sibling containers run on the host engine, not nested.
+    "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {
+      "moby": false
+    },
+    // GitHub CLI. VS Code forwards host `gh` credentials into the
+    // container automatically; run `gh auth login` if not authed on host.
+    "ghcr.io/devcontainers/features/github-cli:1": {}
+  },
+  // Run as the non-root user provided by the base image.
+  "remoteUser": "vscode",
+  // Provision the container (tools + git hooks). See .devcontainer/post-create.sh.
+  "postCreateCommand": "bash .devcontainer/post-create.sh",
+  // Configure tool-specific properties.
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        // Rust
+        "rust-lang.rust-analyzer",
+        "vadimcn.vscode-lldb",
+        "fill-labs.dependi",
+        // Config / formats
+        "tamasfe.even-better-toml",
+        "editorconfig.editorconfig",
+        "mikestead.dotenv",
+        "davidanson.vscode-markdownlint",
+        // Just (justfile syntax highlighting)
+        "nefrob.vscode-just-syntax",
+        // Spell-check (same `typos` engine/config as CLI + CI)
+        "tekumara.typos-vscode",
+        // Diagnostics
+        "usernamehw.errorlens",
+        // Git / GitHub
+        "eamodio.gitlens",
+        "github.vscode-github-actions",
+        "github.vscode-pull-request-github",
+        // Docker (docker-outside-of-docker feature)
+        "ms-azuretools.vscode-docker",
+        // Claude Code
+        "anthropic.claude-code"
+      ],
+      "settings": {
+        // Use clippy instead of plain check so inline diagnostics match CI.
+        "rust-analyzer.check.command": "clippy",
+        // Format on save; Rust is handled by rust-analyzer (rustfmt).
+        "editor.formatOnSave": true,
+        "terminal.integrated.defaultProfile.linux": "bash",
+        // Pin the TOML formatter so formatOnSave is deterministic.
+        "[toml]": {
+          "editor.defaultFormatter": "tamasfe.even-better-toml"
+        }
+      }
+    }
+  }
+  // Uncomment to connect as root instead. More info: https://aka.ms/dev-containers-non-root.
+  // "remoteUser": "root"
 }
