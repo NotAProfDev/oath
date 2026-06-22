@@ -2,8 +2,12 @@
 # Full reference: https://rust-lang.github.io/rustup/overrides.html#the-toolchain-file
 
 [toolchain]
-# Pin to the stable channel. Change to "nightly" to enable unstable rustfmt options.
-channel = "stable"
+# Pin to an exact stable release for reproducible builds: every clone, the
+# devcontainer, and CI compile on the same rustc, so a new stable shipping new
+# clippy lints can't break the `-D warnings` gate on unchanged code. Bump
+# deliberately (keep it >= the MSRV in Cargo.toml) and update the matching
+# `dtolnay/rust-toolchain@<version>` ref in .github/workflows/ci.yml.
+channel = "1.96.0"
 # Components required for CI and the pre-commit hook (fmt + lint).
 components = ["rustfmt", "clippy", "rust-analyzer"]
 # Download only what is needed; rust-docs and other extras are omitted.

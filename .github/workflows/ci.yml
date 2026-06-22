@@ -38,8 +38,9 @@ jobs:
           # CI never pushes; don't persist the token in .git/config.
           persist-credentials: false
 
-      # rust-toolchain.toml supplies channel/components; this action honours it.
-      - uses: dtolnay/rust-toolchain@stable
+      # Pinned to the exact version in rust-toolchain.toml so CI and local builds
+      # share one rustc. Keep this ref in sync when bumping the toolchain pin.
+      - uses: dtolnay/rust-toolchain@1.96.0
         with:
           components: rustfmt, clippy
 
