@@ -1,0 +1,57 @@
+# CodeQL security analysis (SAST) for Rust.
+# Full reference: https://docs.github.com/en/code-security/code-scanning
+#
+# Runs GitHub's CodeQL engine against the workspace to surface security-relevant
+# bug patterns (injection, unsafe data flow, crypto misuse, ...). Findings appear
+# as Code scanning alerts in the Security tab, with Copilot Autofix suggestions.
+
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  # Re-scan unchanged code weekly so newly published CodeQL queries catch latent
+  # issues that no PR would otherwise trigger a scan for. Monday 04:30 UTC.
+  schedule:
+    - cron: "30 4 * * 1"
+
+# Cancel any in-progress run for the same branch when a new push arrives.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Least-privilege floor: grant nothing by default; the job opts into what it needs.
+permissions: {}
+
+jobs:
+  analyze:
+    name: Analyze (rust)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      # Upload analysis results as code scanning alerts.
+      security-events: write
+      # Read the repo (checkout) and workflow metadata.
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # CodeQL never pushes; don't persist the token in .git/config.
+          persist-credentials: false
+
+      # Rust no-build scanning is GA (2025-10-14): CodeQL extracts source directly,
+      # so no Rust toolchain setup or cargo build is required. Default query suite
+      # (high precision, low false-positive) is used when `queries` is omitted.
+      - name: initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: rust
+          build-mode: none
+
+      - name: perform CodeQL analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:rust"

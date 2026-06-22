@@ -1,0 +1,40 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+# CodeRabbit configuration — AI pull-request review.
+# Schema: https://docs.coderabbit.ai/reference/yaml-template
+#
+# Tuned for a low-noise, single-maintainer workflow. CodeRabbit's value here is
+# the AI review layer; the deterministic linters it bundles (clippy, gitleaks,
+# actionlint) are intentionally disabled because `just ci` already enforces them
+# at deny-level, and re-reporting them would only duplicate comments.
+language: en-US
+reviews:
+  # Fewer nitpick comments; surface only higher-signal feedback.
+  profile: chill
+  # Don't gate merges on CodeRabbit; the maintainer decides when to merge.
+  request_changes_workflow: false
+  high_level_summary: true
+  auto_review:
+    enabled: true
+  # Skip generated / vendored / lockfile noise. `!` prefixes exclude a glob.
+  path_filters:
+    - "!target/**"
+    - "!**/Cargo.lock"
+  # Warn (don't block) when a PR title doesn't follow Conventional Commits. PR
+  # titles become the squash-merge commit subject, which the local commit-msg
+  # hook never sees — this is the only check covering that gap.
+  pre_merge_checks:
+    title:
+      mode: warning
+      requirements: >-
+        The PR title must follow Conventional Commits
+        (e.g. `feat(engine): ...`, `fix(risk): ...`, `ci(actions): ...`,
+        `chore(deps): ...`), matching the repo's commit-msg hook.
+  tools:
+    # All three below are already enforced by `just ci` — disable to avoid
+    # duplicate comments and keep CodeRabbit focused on AI review.
+    clippy:
+      enabled: false
+    gitleaks:
+      enabled: false
+    actionlint:
+      enabled: false
