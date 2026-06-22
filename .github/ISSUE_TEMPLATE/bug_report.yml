@@ -97,7 +97,7 @@ body:
       description: Please provide information about your environment.
       placeholder: |
         - OS: [e.g. Linux, macOS, Windows]
-        - Rust: [e.g. 1.85.0]
+        - Rust: [e.g. 1.90.0]
         - OATH version: [e.g. 0.1.0 or git SHA]
     validations:
       required: false

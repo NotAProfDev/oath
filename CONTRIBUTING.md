@@ -71,7 +71,7 @@ Hard rules, enforced workspace-wide by `[workspace.lints]` in the root
 - **Document public items** — `missing_docs` is on.
 - **Respect the dependency direction** in the README graph — never introduce a
   cycle.
-- Edition **2024**, MSRV **1.85** (validate with `just msrv`).
+- Edition **2024**, MSRV **1.90** (validate with `just msrv`).
 
 Lints are single-sourced: the table lives in the root `Cargo.toml`
 (`[workspace.lints]`) and the configurable knobs in [`clippy.toml`](clippy.toml),
