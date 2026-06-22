@@ -13,12 +13,20 @@ reviews:
   # Don't gate merges on CodeRabbit; the maintainer decides when to merge.
   request_changes_workflow: false
   high_level_summary: true
+  # Skip auto-generated Mermaid sequence diagrams: little runtime flow to draw
+  # while the repo is trait-only — reconsider once backends/adapters land.
+  sequence_diagrams: false
+  # No closing poem; keep the walkthrough strictly utilitarian.
+  poem: false
+  # Check whether the PR actually satisfies its linked issue. Reinforces the
+  # repo's "one issue, one PR, Closes #N" workflow (see CLAUDE.md).
+  assess_linked_issues: true
   auto_review:
     enabled: true
   # Skip generated / vendored / lockfile noise. `!` prefixes exclude a glob.
   path_filters:
     - "!target/**"
-    - "!**/Cargo.lock"
+    - "!**/*.lock"
   # Warn (don't block) when a PR title doesn't follow Conventional Commits. PR
   # titles become the squash-merge commit subject, which the local commit-msg
   # hook never sees — this is the only check covering that gap.
@@ -29,6 +37,9 @@ reviews:
         The PR title must follow Conventional Commits
         (e.g. `feat(engine): ...`, `fix(risk): ...`, `ci(actions): ...`,
         `chore(deps): ...`), matching the repo's commit-msg hook.
+    # Warn (don't block) when a PR doesn't appear to address its linked issue.
+    issue_assessment:
+      mode: warning
   tools:
     # All three below are already enforced by `just ci` — disable to avoid
     # duplicate comments and keep CodeRabbit focused on AI review.
@@ -38,3 +49,13 @@ reviews:
       enabled: false
     actionlint:
       enabled: false
+# Let fork-PR authors (external contributors) interact with the bot — ask for
+# re-reviews, explanations, etc. Defaults to org members only, which is the
+# wrong default for a public repo.
+chat:
+  allow_non_org_members: true
+# Keep review learnings scoped to this repo: deterministic, self-contained, and
+# nothing from a public repo leaks into a shared global pool.
+knowledge_base:
+  learnings:
+    scope: local
