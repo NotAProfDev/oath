@@ -51,7 +51,28 @@ jobs:
       # https://github.com/taiki-e/install-action and adjust that one name.
       - uses: taiki-e/install-action@v2
         with:
-          tool: just,cargo-nextest,cargo-deny,cargo-machete,taplo-cli,typos-cli,gitleaks,actionlint,shellcheck
+          tool: just,cargo-nextest,cargo-deny,cargo-machete,taplo-cli,typos-cli,shellcheck
+
+      # actionlint and gitleaks ship as Go binaries on GitHub Releases. Pin the
+      # version and verify the SHA-256 so a tampered or moved asset fails closed.
+      - name: install actionlint + gitleaks
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.local/bin"
+          install_pinned() {
+            name="$1"; url="$2"; sha="$3"
+            tgz="$RUNNER_TEMP/$name.tar.gz"
+            curl --proto '=https' --tlsv1.2 -sSfL "$url" -o "$tgz"
+            echo "$sha  $tgz" | sha256sum --check --status
+            tar -xzf "$tgz" -C "$HOME/.local/bin" "$name"
+          }
+          install_pinned actionlint \
+            https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz \
+            8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+          install_pinned gitleaks \
+            https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz \
+            551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       # One command — identical to `just ci` run locally and by the pre-push hook.
       - name: ci
@@ -66,11 +87,11 @@ jobs:
           retention-days: 7
 
   # Verify that the codebase compiles on the declared minimum supported Rust
-  # version. rust-version = "1.85" in Cargo.toml is metadata only — without
-  # this job, accidentally using a post-1.85 API would go undetected until a
+  # version. rust-version = "1.90" in Cargo.toml is metadata only — without
+  # this job, accidentally using a post-1.90 API would go undetected until a
   # downstream user reports a compile error.
   msrv:
-    name: MSRV (1.85)
+    name: MSRV (1.90)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -82,7 +103,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: dtolnay/rust-toolchain@1.85
+      - uses: dtolnay/rust-toolchain@1.90
 
       # Cache keyed separately from the `ci` job because of the different toolchain.
       - uses: Swatinem/rust-cache@v2

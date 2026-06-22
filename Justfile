@@ -55,9 +55,9 @@ check:
 lint:
     cargo clippy {{SCOPE}} --locked -- -D warnings
 
-# Verify compilation on the declared MSRV. Requires: rustup toolchain install 1.85
+# Verify compilation on the declared MSRV. Requires: rustup toolchain install 1.90
 msrv:
-    cargo +1.85 check --workspace --all-targets --all-features
+    cargo +1.90 check --workspace --all-targets --all-features
 
 # ── Test ──────────────────────────────────────────────────────────────────────
 
@@ -76,9 +76,12 @@ test-no-run:
 typos:
     typos
 
-# Scan the worktree and history for committed secrets.
+# Scan the worktree and the current branch's history for committed secrets.
+# Scope to HEAD's ancestry (not every local ref): the gate is about what this
+# branch would push, and it keeps a multi-branch local clone from tripping on
+# unrelated branches' history — matching what CI scans on a single-branch checkout.
 gitleaks:
-    gitleaks detect --no-banner
+    gitleaks detect --no-banner --log-opts="HEAD"
 
 # Lint GitHub Actions workflow files.
 actionlint:

@@ -59,7 +59,7 @@ Hard rules, enforced workspace-wide by `[workspace.lints]`:
 - **Document public items** — `missing_docs` is warned.
 - **Respect dependency direction** — `oath-model` is the root; never introduce a
   cycle or a dep that contradicts the README graph.
-- Edition **2024**, MSRV **1.85** (validate with `just msrv`).
+- Edition **2024**, MSRV **1.90** (validate with `just msrv`).
 
 ## Commits & labels
 
