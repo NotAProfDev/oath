@@ -2,28 +2,31 @@
 # Full reference: https://doc.rust-lang.org/cargo/reference/workspaces.html
 
 [workspace]
-resolver = "2"
+resolver = "3"
 members = [
-    "crates/model",
-    "crates/net/core",
-    "crates/messaging/core",
-    "crates/persistence/core",
-    "crates/ingest/core",
-    "crates/execution/core",
-    "crates/portfolio/core",
-    "crates/risk/core",
-    "crates/strategy/core",
-    "crates/engine",
+  "crates/model",
+  "crates/net/core",
+  "crates/messaging/core",
+  "crates/persistence/core",
+  "crates/ingest/core",
+  "crates/execution/core",
+  "crates/portfolio/core",
+  "crates/risk/core",
+  "crates/strategy/core",
+  "crates/engine",
 ]
 
 # --- Package metadata ---
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.90"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/NotAProfDev/oath"
 description = "A modular, backend-agnostic trading engine"
+readme = "README.md"
+keywords = ["trading", "engine", "finance", "async", "backend-agnostic"]
+categories = ["finance", "asynchronous"]
 
 # --- Dependencies ---
 [workspace.dependencies]
@@ -40,37 +43,48 @@ oath-risk-core = { path = "crates/risk/core", version = "0.1.0" }
 oath-strategy-core = { path = "crates/strategy/core", version = "0.1.0" }
 
 # External shared — backend-specific deps belong in individual crate Cargo.toml files
-bytes        = "1"
-http         = "1"
-http-body    = "1"
+bytes = "1"
+http = "1"
+http-body = "1"
 futures-core = { version = "0.3", default-features = false }
 futures-sink = { version = "0.3", default-features = false }
-serde        = { version = "1", features = ["derive"] }
-thiserror    = "2"
-tokio        = { version = "1", features = ["full"] }
-tracing      = "0.1"
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
 
 # --- Lints ---
 # Centralized lint configuration inherited by all workspace crates via `[lints] workspace = true`.
 # Full reference: https://doc.rust-lang.org/cargo/reference/workspaces.html#the-lints-table
 [workspace.lints.rust]
+# Memory safety is a core requirement for a financial engine — deny unsafe
+# workspace-wide. A crate that genuinely needs FFI overrides this in its own
+# `[lints]` table, with justification — denied by default, escapable on purpose.
+unsafe_code = "deny"
 unused_imports = "warn"
 dead_code = "warn"
 missing_docs = "warn"
-rust_2018_idioms = "warn"
+# Flag `pub` items that aren't actually reachable outside the crate.
+unreachable_pub = "warn"
+# Modern idioms — a lint *group*, so it needs `priority = -1` to stay below the
+# individual lints above (a targeted lint / `#[allow(...)]` always wins).
+rust_2018_idioms = { level = "warn", priority = -1 }
 missing_debug_implementations = "warn"
 
 [workspace.lints.clippy]
-all = "warn"
-pedantic = "warn"
-nursery = "warn"
-cargo = "warn"
+# Lint groups. `priority = -1` keeps each group below the individual lints further
+# down, so a targeted lint / `#[allow(...)]` / per-crate override always wins.
+all = { level = "deny", priority = -1 }      # correctness, suspicious, style, complexity, perf — hard error
+pedantic = { level = "warn", priority = -1 } # broader, occasionally noisy guidance — visible, non-blocking
+nursery = { level = "warn", priority = -1 }  # newer, still-stabilizing lints — advisory
+cargo = { level = "warn", priority = -1 }    # manifest hygiene (feature names, wildcard deps, …)
 # Internal workspace crates are not published to crates.io
 cargo_common_metadata = { level = "allow", priority = 1 }
 # Transitive deps may carry duplicate versions outside our control
 multiple_crate_versions = { level = "allow", priority = 1 }
-# In the restriction group (not covered by `all`) — catches leftover dbg!() calls
-dbg_macro = "warn"
+# In the restriction group (not covered by `all`) — a committed dbg!() is always
+# a mistake, so block it outright rather than merely warning.
+dbg_macro = "deny"
 # Panicking in a function that returns Result is always a bug.
 panic_in_result_fn = "warn"
 # Enforce explicit error handling — no silent panics from unwrap/expect/indexing.
@@ -90,6 +104,10 @@ indexing_slicing = "warn"
 #   opt-level=0  debug=true  overflow-checks=true  debug-assertions=true
 #   incremental=true  codegen-units=256  panic="unwind"
 [profile.release]
+# (Default: false) — keep arithmetic overflow checks on even in release. A silent
+# wraparound in financial math is a correctness bug, not a performance trade-off
+# worth making; the overhead is negligible relative to the safety it buys.
+overflow-checks = true
 # (Default: false) — whole-program optimization for maximum runtime performance.
 lto = "fat"
 # (Default: 16) — single codegen unit required for full LTO effectiveness.

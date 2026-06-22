@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 if ! command -v just >/dev/null 2>&1; then
-    echo "pre-commit: 'just' not found — refusing to commit (fail closed)." >&2
+    echo "commit-msg: 'just' not found — refusing to commit (fail closed)." >&2
     echo "  Install just (https://just.systems) or re-enter the devcontainer." >&2
     exit 1
 fi
-exec just pre-commit
+exec just commit-msg "$1"

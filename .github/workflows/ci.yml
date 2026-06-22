@@ -14,12 +14,19 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Least-privilege floor for the whole workflow: grant nothing by default and let
+# each job opt into exactly the scopes it needs.
+permissions: {}
+
 jobs:
   ci:
     name: CI
     runs-on: ubuntu-latest
-    # Minimal token permissions — this job only needs to read the repository
-    # and write to Actions (cache + artifact upload).
+    timeout-minutes: 30
+    # checkout is the only step that uses GITHUB_TOKEN, and it only reads the
+    # repo. The cache and artifact-upload steps authenticate with the Actions
+    # runtime token (ACTIONS_RUNTIME_TOKEN), not GITHUB_TOKEN — so contents:read
+    # is the complete set of scopes this job needs.
     permissions:
       contents: read
     env:
@@ -27,44 +34,51 @@ jobs:
       CARGO_TERM_COLOR: always
     steps:
       - uses: actions/checkout@v6
+        with:
+          # CI never pushes; don't persist the token in .git/config.
+          persist-credentials: false
 
-        # dtolnay/rust-toolchain reads rust-toolchain.toml automatically,
-        # so the channel, components, and profile are sourced from that file.
+      # rust-toolchain.toml supplies channel/components; this action honours it.
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
 
-        # Cache ~/.cargo/registry, ~/.cargo/git, and target/ keyed by OS,
-        # Rust version, and Cargo.lock — typically 5–10× faster on cache hits.
+      # Cache registry/git/target keyed by OS + Rust version + Cargo.lock.
       - uses: Swatinem/rust-cache@v2
 
-        # Reject any formatting divergence; must pass before heavier checks.
-      - name: fmt
-        run: cargo fmt --all -- --check
+      # Single fast installer for every non-rustc tool the just recipes call.
+      # If a tool name errors, check the supported list at
+      # https://github.com/taiki-e/install-action and adjust that one name.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just,cargo-nextest,cargo-deny,cargo-machete,taplo-cli,typos-cli,shellcheck
 
-        # Type-check every crate and target (bins, tests, benches) without codegen.
-      - name: check
-        run: cargo check --workspace --all-targets --all-features
+      # actionlint and gitleaks ship as Go binaries on GitHub Releases. Pin the
+      # version and verify the SHA-256 so a tampered or moved asset fails closed.
+      - name: install actionlint + gitleaks
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.local/bin"
+          install_pinned() {
+            name="$1"; url="$2"; sha="$3"
+            tgz="$RUNNER_TEMP/$name.tar.gz"
+            curl --proto '=https' --tlsv1.2 -sSfL "$url" -o "$tgz"
+            echo "$sha  $tgz" | sha256sum --check --status
+            tar -xzf "$tgz" -C "$HOME/.local/bin" "$name"
+          }
+          install_pinned actionlint \
+            https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz \
+            8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+          install_pinned gitleaks \
+            https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz \
+            551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
-        # Lint every crate and target; -D warnings turns all warnings into hard failures.
-      - name: clippy
-        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+      # One command — identical to `just ci` run locally and by the pre-push hook.
+      - name: ci
+        run: just ci
 
-        # Run the full test suite.
-      - name: test
-        run: cargo test --workspace --all-features
-
-        # Build docs for all workspace crates. RUSTDOCFLAGS catches broken intra-doc
-        # links and other rustdoc warnings. RUSTFLAGS is intentionally omitted —
-        # [workspace.lints.rust] already promotes rustc warnings to errors for our
-        # crates without affecting dependencies or busting the Swatinem cache key.
-      - name: doc
-        run: cargo doc --workspace --no-deps --document-private-items --all-features
-        env:
-          RUSTDOCFLAGS: "-D warnings"
-
-        # Upload the generated HTML docs as a workflow artifact (viewable in the
-        # Actions UI; kept for 7 days to avoid burning the default 90-day quota).
+      # `just ci` runs `cargo doc`; publish the generated HTML.
       - name: upload docs
         uses: actions/upload-artifact@v7
         with:
@@ -72,32 +86,33 @@ jobs:
           path: target/doc
           retention-days: 7
 
-        # Audit licenses, advisories, bans, and sources against deny.toml.
-      - name: deny
-        uses: EmbarkStudios/cargo-deny-action@v2
-
   # Verify that the codebase compiles on the declared minimum supported Rust
-  # version. rust-version = "1.85" in Cargo.toml is metadata only — without
-  # this job, accidentally using a post-1.85 API would go undetected until a
+  # version. rust-version = "1.90" in Cargo.toml is metadata only — without
+  # this job, accidentally using a post-1.90 API would go undetected until a
   # downstream user reports a compile error.
   msrv:
-    name: MSRV (1.85)
+    name: MSRV (1.90)
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
     env:
       CARGO_TERM_COLOR: always
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
 
-      - uses: dtolnay/rust-toolchain@1.85
+      - uses: dtolnay/rust-toolchain@1.90
 
-        # Cache keyed separately from the `ci` job because of the different toolchain.
+      # Cache keyed separately from the `ci` job because of the different toolchain.
       - uses: Swatinem/rust-cache@v2
         with:
           key: msrv
 
-        # Only check compilation — no clippy (it may introduce post-MSRV lints)
-        # and no tests (test harness APIs may differ across Rust versions).
-      - name: check
-        run: cargo check --workspace --all-targets --all-features
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just
+
+      - name: msrv
+        run: just msrv

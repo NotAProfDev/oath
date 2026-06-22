@@ -17,6 +17,42 @@ body:
         - label: I have searched the existing issues
           required: true
 
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severity
+      description: How severely does this bug impact your workflow?
+      options:
+        - P0 (system down / data loss)
+        - P1 (major feature broken, no workaround)
+        - P2 (minor feature broken, workaround exists)
+        - P3 (cosmetic / low-impact)
+      default: 2
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      description: Best-guess crate or subsystem. A maintainer applies the matching label during triage.
+      options:
+        - "Unsure / other"
+        - "oath-model"
+        - "oath-net"
+        - "oath-messaging"
+        - "oath-persistence"
+        - "oath-ingest"
+        - "oath-execution"
+        - "oath-portfolio"
+        - "oath-risk"
+        - "oath-strategy"
+        - "oath-engine"
+        - "tooling / CI"
+        - "docs"
+    validations:
+      required: false
+
   - type: textarea
     id: description
     attributes:
@@ -36,7 +72,7 @@ body:
         3. Observe ...
         4. (Optional) Paste a minimal code snippet here
     validations:
-      required: true
+      required: false
 
   - type: textarea
     id: expected
@@ -61,13 +97,22 @@ body:
       description: Please provide information about your environment.
       placeholder: |
         - OS: [e.g. Linux, macOS, Windows]
-        - Rust: [e.g. 1.85.0]
+        - Rust: [e.g. 1.90.0]
         - OATH version: [e.g. 0.1.0 or git SHA]
     validations:
-      required: true
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs or output
+      description: Paste any error messages, panic output, or backtraces. This is rendered as code, so no backticks needed.
+      render: shell
+    validations:
+      required: false
 
   - type: textarea
     id: context
     attributes:
       label: Additional context
-      description: Any other context, logs, or screenshots.
+      description: Any other context or screenshots.

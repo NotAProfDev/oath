@@ -2,11 +2,11 @@
 # Full reference: https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
 #
 # Opens weekly PRs for outdated dependencies across all three package ecosystems.
-# Cargo.lock is gitignored (library convention), so Dependabot targets Cargo.toml
-# version constraints directly.
+# Cargo.lock is committed and every CI/just recipe runs with `--locked`, so the
+# cargo updates refresh both the Cargo.toml constraints and the Cargo.lock entries.
 version: 2
 updates:
-  # Rust crate dependencies — targets version constraints in Cargo.toml files.
+  # Rust crate dependencies — updates Cargo.toml constraints and the committed Cargo.lock.
   - package-ecosystem: cargo
     directory: /
     schedule:
@@ -34,7 +34,7 @@ updates:
     ignore:
       # dtolnay/rust-toolchain uses the @ref as the Rust version to install,
       # not as a semver action release. @stable always resolves to latest stable
-      # (no update needed), and @1.85 is our intentional MSRV pin (must only
+      # (no update needed), and @1.90 is our intentional MSRV pin (must only
       # change when we deliberately raise the MSRV — not via Dependabot).
       - dependency-name: "dtolnay/rust-toolchain"
 

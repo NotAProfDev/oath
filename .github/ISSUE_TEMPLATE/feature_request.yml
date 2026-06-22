@@ -10,18 +10,36 @@ body:
         Thanks for suggesting an improvement. Please describe your idea in detail.
 
   - type: checkboxes
+    id: prerequisites
     attributes:
-      label: Is there an existing issue for this?
-      description: Please search to see if an issue already exists for the feature you are requesting.
+      label: Prerequisites
+      description: Please check the following before submitting.
       options:
         - label: I have searched the existing issues
           required: true
+        - label: This feature is not already covered by an open issue
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      description: How important is this feature?
+      options:
+        - P0 (blocking / critical)
+        - P1 (high — important)
+        - P2 (medium — nice-to-have)
+        - P3 (low — someday / maybe)
+      default: 2
+    validations:
+      required: true
 
   - type: textarea
     id: problem
     attributes:
       label: Problem or motivation
       description: What problem does this solve, or what need does it address?
+      placeholder: |
+        As a trader using OATH, I'm frustrated by...
     validations:
       required: true
 
@@ -32,8 +50,59 @@ body:
       description: Describe the feature or change you have in mind. If possible, include a minimal code example or mockup.
       placeholder: |
         (Optional) Paste a minimal code snippet or example here
+
+  - type: textarea
+    id: acceptance-criteria
+    attributes:
+      label: Acceptance criteria
+      description: Specific conditions that must be met for this feature to be considered complete. Use bullet points.
+      placeholder: |
+        - [ ] User can place an order via the REST API
+        - [ ] Order is persisted in the database before acknowledgment
+        - [ ] Risk checks run before execution
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: In scope
+      description: What this feature explicitly covers.
+      placeholder: "Order placement via REST API, database persistence, risk pre-check"
+
+  - type: textarea
+    id: out-of-scope
+    attributes:
+      label: Out of scope / Non-goals
+      description: What is explicitly NOT covered by this feature. Prevents scope creep.
+      placeholder: "WebSocket support, order cancellation, historical backtesting"
+
+  - type: input
+    id: plan_link
+    attributes:
+      label: Implementation Plan
+      description: Link to the implementation plan at docs/superpowers/plans/<slug>.md (created with the writing-plans skill). If not yet created, leave blank.
+      placeholder: "docs/superpowers/plans/order-lifecycle.md"
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      description: Best-guess crate or subsystem. A maintainer applies the matching label during triage.
+      options:
+        - "Unsure / other"
+        - "oath-model"
+        - "oath-net"
+        - "oath-messaging"
+        - "oath-persistence"
+        - "oath-ingest"
+        - "oath-execution"
+        - "oath-portfolio"
+        - "oath-risk"
+        - "oath-strategy"
+        - "oath-engine"
+        - "tooling / CI"
+        - "docs"
     validations:
-      required: true
+      required: false
 
   - type: textarea
     id: alternatives

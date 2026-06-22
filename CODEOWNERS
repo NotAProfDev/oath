@@ -1,0 +1,6 @@
+# Code owners for OATH. Each pattern maps to its reviewer(s); GitHub auto-requests
+# review from the owner when a matching file changes in a pull request.
+# Reference: https://docs.github.com/en/repositories/managing-your-repositories-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default owner for everything in the repository.
+* @NotAProfDev
