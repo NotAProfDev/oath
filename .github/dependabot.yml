@@ -15,10 +15,17 @@ updates:
       prefix: "chore(deps)"
     # GitHub auto-creates the "dependencies" label on the first Dependabot PR.
     labels: ["dependencies"]
-    # Batch all crate bumps into one PR per week instead of one PR per crate.
+    # Don't bump to a release on its first day — gives yanks/regressions time to
+    # surface before we pull a new version in.
+    cooldown:
+      default-days: 7
+    # Batch minor/patch crate bumps into one PR per week. Major bumps are
+    # excluded from the group so each lands as its own reviewable PR — a breaking
+    # major can then fail CI without blocking the safe batch.
     groups:
       rust-crates:
         patterns: ["*"]
+        update-types: ["minor", "patch"]
 
   # GitHub Actions — pins action versions in .github/workflows/*.yml.
   - package-ecosystem: github-actions
@@ -28,9 +35,11 @@ updates:
     commit-message:
       prefix: "ci(actions)"
     labels: ["ci"]
+    # Group minor/patch action bumps; major bumps land as individual PRs.
     groups:
       github-actions:
         patterns: ["*"]
+        update-types: ["minor", "patch"]
     ignore:
       # dtolnay/rust-toolchain uses the @ref as the Rust version to install,
       # not as a semver action release. @stable always resolves to latest stable
@@ -47,6 +56,8 @@ updates:
     commit-message:
       prefix: "ci(devcontainer)"
     labels: ["ci"]
+    # Group minor/patch feature bumps; major bumps land as individual PRs.
     groups:
       devcontainer-features:
         patterns: ["*"]
+        update-types: ["minor", "patch"]
