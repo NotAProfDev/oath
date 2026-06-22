@@ -41,10 +41,12 @@ updates:
         patterns: ["*"]
         update-types: ["minor", "patch"]
     ignore:
-      # dtolnay/rust-toolchain uses the @ref as the Rust version to install,
-      # not as a semver action release. Both refs are intentional Rust-version
-      # pins — @1.96.0 mirrors rust-toolchain.toml, @1.90 is the MSRV pin — and
-      # must change only via a deliberate, reviewed bump, never via Dependabot.
+      # dtolnay/rust-toolchain is SHA-pinned to a `master` commit; the workflows
+      # pick the Rust version via the `toolchain` input (only `master` exposes
+      # that input — the per-version branches bake the version in and drop it).
+      # The action publishes no semver releases, so Dependabot has no release
+      # stream to track here, and the pinned SHA must change only via a
+      # deliberate, reviewed bump.
       - dependency-name: "dtolnay/rust-toolchain"
 
   # Dev container features — updates feature versions in devcontainer.json and
