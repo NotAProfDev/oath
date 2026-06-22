@@ -3,6 +3,7 @@
 # OATH — Open Automatic Trading Hub
 
 [![CI](https://github.com/NotAProfDev/oath/actions/workflows/ci.yml/badge.svg)](https://github.com/NotAProfDev/oath/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/NotAProfDev/oath/actions/workflows/codeql.yml/badge.svg)](https://github.com/NotAProfDev/oath/actions/workflows/codeql.yml)
 
 A modular, backend-agnostic trading engine for Rust.
 
