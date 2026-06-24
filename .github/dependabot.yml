@@ -11,6 +11,8 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    # 5 is also the version-update default; set explicitly so the cap is visible.
+    open-pull-requests-limit: 5
     commit-message:
       prefix: "chore(deps)"
     # GitHub auto-creates the "dependencies" label on the first Dependabot PR.
@@ -32,6 +34,7 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    open-pull-requests-limit: 5
     commit-message:
       prefix: "ci(actions)"
     labels: ["ci"]
@@ -55,6 +58,7 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    open-pull-requests-limit: 5
     commit-message:
       prefix: "ci(devcontainer)"
     labels: ["ci"]
