@@ -1,7 +1,8 @@
 # From-scratch architecture — grilling summary (2026-06-23)
 
 **Status:** Branch (A) — crate & dependency-graph revision — **closed 2026-06-24**
-(ADRs 0007–0009). Branches (B) strategy runtime and (C) Frontend/CLI remain.
+(ADRs 0007–0009). Branch (B) — strategy runtime & multi-topic-join — **closed
+2026-06-25** (ADRs 0010–0013). Branch (C) Frontend/CLI remains.
 
 ## The question
 
@@ -34,8 +35,8 @@ decided *not* to build — revising it is open branch (A) below.
   continuous autonomous control loop with cancel/amend authority, not a pre-trade
   gate. Strategies detect & propose Signals; Core decides & acts.
 - **[ADR-0005](../../adr/0005-single-writer-event-sourced-core.md)** —
-  Single-writer, event-sourced, deterministic Core. MVP = single-threaded kernel
-  + offloaded async I/O (NautilusTrader-validated); disruptor pipeline is a
+  Single-writer, event-sourced, deterministic Core. MVP = single-threaded kernel +
+  offloaded async I/O (NautilusTrader-validated); disruptor pipeline is a
   later, *measured* optimization. Replay = fold over the Event Log.
 - **[ADR-0006](../../adr/0006-broker-reconciliation-contract.md)** — Broker is
   the source of truth. Recovery = replay + reconcile, joined by a client order
@@ -53,6 +54,29 @@ decided *not* to build — revising it is open branch (A) below.
   `<subsystem>/api` = traits, `core/` = the Core process. `oath-engine` and
   `oath-ingest-core` deleted; Event Log / repositories split; new `supervisor` and
   `cli` (Frontend) binaries.
+- **[ADR-0010](../../adr/0010-strategies-out-of-core-deterministic-folds.md)** —
+  Strategies run only in Strategy Nodes (never in Core; supersedes ADR-0001
+  co-location), wholly outside Core's deterministic boundary: a Strategy is a
+  deterministic fold over Bus inputs + injected clock/seed, external data via Data
+  Providers. Backtest-safety is a capability-derived (`DetCtx`/`IoCtx`) _fidelity
+  label_, not a gate.
+- **[ADR-0011](../../adr/0011-execution-environments-mode-isolation.md)** — Trading
+  mode = _(data feed × execution backend)_; the Simulated Broker is a Broker-adapter
+  backend, so Backtest/Shadow/Paper/Live are one matrix and Core + Strategy are
+  mode-agnostic. Each mode is an isolated **Environment** (own Core, Event Log,
+  state, execution adapter, Bus namespace), temporally homogeneous; the order path
+  is never shared.
+- **[ADR-0012](../../adr/0012-strategy-input-fusion-event-time-parity.md)** —
+  Framework delivers an event-time-ordered merge + latest-value view; per-Environment
+  lateness bound `L` (`L=0` live, zero added latency). Ingestion-order logging gives
+  bit-exact session replay; fresh backtest uses event-time + `L` (parity above `L`).
+  Late events marked-and-counted, never dropped.
+- **[ADR-0013](../../adr/0013-strategy-runtime-push-signal-target-registration.md)** —
+  One push framework (`DetCtx` sync / `IoCtx` async; timers as injected events). A
+  Signal is an idempotent _desired target_ + freshness + `StrategyId`. Registration
+  is a two-part handshake: Supervisor joins effectfully, then a logged "Strategy
+  admitted" Core input makes the active-strategy set + limits deterministic. Fault
+  isolation: freshness-reject + evict laggards; one-strategy-per-node default.
 
 Glossary: **[CONTEXT.md](../../../CONTEXT.md)** (primitives, processes, messages,
 persistence/recovery, transport).
@@ -69,9 +93,10 @@ cross-process complexity to buy crash containment and hot-pluggability.
 
 - **(A) Crate & dependency-graph revision** — ✅ **closed 2026-06-24** (ADR-0009).
   Spine-inverted, process-aligned topology; full target tree recorded in the ADR.
-- **(B) Strategy runtime & multi-topic-join framework** — subscribing to and
-  *fusing* multiple streams (market data + news → Signal); the strategy↔Core
-  seam; strategy sandboxing contract.
+- **(B) Strategy runtime & multi-topic-join framework** — ✅ **closed 2026-06-25**
+  (ADRs 0010–0013). Out-of-Core deterministic-fold strategies; capability-derived
+  backtest fidelity; Environments & mode isolation; event-time fusion + parity/`L`;
+  push framework, Signal-as-target, registration, fault isolation.
 - **(C) Frontend / CLI design** — the MVP CLI Frontend: observability + operational
   control (no trading control — operator orders route through Signal→risk later);
   query channels (req/resp to Core & Supervisor) and telemetry topics.
@@ -82,9 +107,9 @@ cross-process complexity to buy crash containment and hot-pluggability.
 - Bus trait's **loan-vs-own** contract (design to the borrowed/lifecycle-bounded
   case to keep zero-copy).
 - Per-topic **delivery semantics** detail + backpressure / ring sizing.
-- **Req/resp pattern** (registration, reconciliation queries, Frontend queries):
-  the request is effectful/live-only, the response enters Core as an ordered input;
-  Bus-capability vs side-channel TBD.
+- **Req/resp pattern** (reconciliation queries, Frontend queries): the request is
+  effectful/live-only, the response enters Core as an ordered input; Bus-capability
+  vs side-channel TBD. _Registration is now a settled instance (ADR-0013)._
 - **Event Log / repository backend**: parquet + DataFusion / DuckDB candidate
   (keep the log↔repository split from ADR-0009).
 - **Snapshot** cadence and contents (recovery substrate).
@@ -95,3 +120,15 @@ cross-process complexity to buy crash containment and hot-pluggability.
 - **Deterministic client-order-id** generation scheme.
 - **Core failover** (Aeron-Cluster-style hot standby) — future, documented in
   ADR-0005.
+- **Strategy sandbox** (Branch B): MVP relies on process isolation (Strategy Node)
+  and the capability-derived determinism contexts (`DetCtx`/`IoCtx`). Physical
+  WASM isolation for untrusted/effectful strategies is later hardening — candidate
+  runtime **Extism** (<https://github.com/extism/extism>), whose host-function
+  capability model maps onto the `DetCtx`/`IoCtx` boundary. WASM is also the
+  density answer at scale: many sandboxed strategies in one process with
+  per-strategy fault isolation (process-per-strategy doesn't reach 1000s of
+  strategies on one host).
+- **Simulated Broker fill model** (ADR-0011): fill-at-touch vs queue-position vs a
+  slippage/latency model — governs Backtest/Shadow fidelity.
+- **Delay-alignment mechanism** (ADR-0011): delay-relay vs adapter delayed-mode for
+  aligning enrichment to a delayed market feed.

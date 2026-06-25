@@ -50,8 +50,8 @@ _Avoid_: feed, vendor, source.
 The process and central decision authority. Holds all live state needed for
 portfolio and risk decisions (positions, open orders, exposure) and
 continuously surveils it. Acts autonomously — e.g. cancels or amends a resting
-order when conditions change — not only in response to a strategy. Initially
-also hosts strategies.
+order when conditions change — not only in response to a strategy. Never hosts
+strategies in-process; they always run in separate Strategy Nodes.
 _Avoid_: server, hub, main, master, cache.
 
 **Kernel**:
@@ -75,9 +75,17 @@ private state it needs is custodied by the Kernel.
 _Avoid_: rule engine, handler, check, plugin, strategy (reserved for the
 user-facing Strategy).
 
+**Strategy**:
+A unit of user-authored logic, hosted in a Strategy Node, that consumes market
+data and enrichment off the Bus and proposes Signals. It never trades directly —
+Core decides and acts. A _deterministic_ Strategy folds purely over its Bus
+inputs; an _effectful_ Strategy may also do ad-hoc I/O.
+_Avoid_: algo, bot, model, signal generator.
+
 **Strategy Node**:
-A process hosting one or more user strategies, isolated so that a strategy
-fault cannot crash the Core.
+A separate process — never Core itself — hosting one or more user strategies,
+isolated so that a strategy fault cannot crash the Core. Communicates with Core
+only over the Bus.
 _Avoid_: worker, runner, bot.
 
 **Supervisor**:
@@ -94,12 +102,48 @@ CLI is the first Frontend; TUIs, web, and desktop UIs are later ones. Depends on
 on the public message model, Bus, and query interfaces.
 _Avoid_: UI, dashboard, console, client.
 
+## Execution environments
+
+**Environment**:
+An isolated instance of the OATH topology — its own Core, Event Log,
+portfolio/risk state, execution-adapter binding, data feeds, and Bus namespace —
+so that several can run on one host without their orders, fills, positions, or
+logs colliding. Its mode is its data feed × execution backend (e.g. live feed ×
+live account); all its feeds share one temporal profile (real-time, delayed-by-D,
+or historical).
+_Avoid_: instance, deployment, tenant, session.
+
+**Simulated Broker**:
+A Broker-adapter backend that fills Orders internally against the Environment's
+own market-data feed instead of routing to a real venue. The execution backend
+for Backtest and Shadow.
+_Avoid_: mock, fake, matching engine, paper (paper uses a real broker account).
+
+**Shadow**:
+An Environment running live (or delayed) data through a Simulated Broker,
+alongside Live or Paper, to test a Strategy on real-time data with no capital at
+risk. It fills against the exact data the Strategy saw, exercising the model
+end-to-end.
+_Avoid_: dry-run, what-if, sim.
+
+**Paper Trading**:
+An Environment routing real Orders to a broker's paper (demo) account — real
+broker-side execution, no real money, often on the broker's delayed market data.
+_Avoid_: demo, sandbox, simulation.
+
+**Live Trading**:
+An Environment routing real Orders to a broker's live account, with real money at
+risk.
+_Avoid_: production, real-money mode.
+
 ## Messages & decisions
 
 **Signal**:
-A strategy's proposal to trade (which `Symbol`, `Side`, size/urgency),
-submitted to Core for a decision. Not itself an order — Core decides whether,
-when, and how much to act.
+A Strategy's proposal of a _desired target_ — the position or exposure it wants
+in a `Symbol` — submitted to Core for a decision, never an Order. Idempotent and
+nettable: Core reconciles actual → target across strategies under risk, deciding
+whether, when, and how much to act. Carries the as-of freshness it was decided
+under and the proposing Strategy's identity.
 _Avoid_: order, intent, trade (from a strategy).
 
 **Decision**:
@@ -134,6 +178,16 @@ Re-feeding the Event Log through the identical fold to reconstruct state, with
 all external side effects suppressed. The basis of both recovery and
 backtesting.
 _Avoid_: rerun, simulation (for the deterministic re-feed specifically).
+
+**Backtest**:
+Running live Strategy code against recorded historical market data and
+enrichment, fed in timestamp order through the same Core wired to a Simulated
+Broker, to evaluate what it would have done. A deterministic Strategy's Backtest reproducibly matches live;
+an effectful Strategy can still be backtested, but parity and freedom from
+lookahead are then the author's responsibility, not the framework's. Distinct
+from Replay: Replay re-feeds Core's _logged_ inputs and never re-runs strategies,
+whereas a Backtest _regenerates_ Signals from the Strategy.
+_Avoid_: simulation, paper trading, replay (for this).
 
 ## Transport
 
