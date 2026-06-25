@@ -38,6 +38,10 @@ updates:
     commit-message:
       prefix: "ci(actions)"
     labels: ["ci"]
+    # Same first-day cooldown as cargo above — let yanks/regressions surface
+    # before a freshly-published action version is proposed.
+    cooldown:
+      default-days: 7
     # Group minor/patch action bumps; major bumps land as individual PRs.
     groups:
       github-actions:
@@ -62,6 +66,10 @@ updates:
     commit-message:
       prefix: "ci(devcontainer)"
     labels: ["ci"]
+    # Same first-day cooldown as cargo above — let yanks/regressions surface
+    # before a freshly-published feature version is proposed.
+    cooldown:
+      default-days: 7
     # Group minor/patch feature bumps; major bumps land as individual PRs.
     groups:
       devcontainer-features:
