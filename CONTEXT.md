@@ -161,6 +161,42 @@ _Avoid_: trade, transaction.
 A partial or complete execution of an order, reported by a broker.
 _Avoid_: execution, trade, transaction.
 
+**Emergency Halt**:
+An operator-tripped switch that puts Core's Risk Engine into cancel-all / flatten
+mode — operational safety, not operator trading: it picks no Symbol, Side, or
+Quantity, only invoking risk's existing authority (a control of the risk loop, not
+an Order). The Supervisor performs the effectful trip and emits a logged Core
+input, so it is deterministic and replayable.
+_Avoid_: kill-switch, panic button, stop (for the process-lifecycle sense).
+
+## Observability
+
+**Business State**:
+The continuous, observable state of the trading business — positions, P&L,
+exposure — projected from Core's canonical fold and pushed as one coalesced,
+latest-value snapshot, stamped with the Event Log sequence it reflects so
+observers detect a stalled producer rather than a steady value. Rendered
+directly, never re-folded. The observable subset of Core state — distinct from
+the recovery Snapshot (full internal state) and from Telemetry (machinery, not
+business).
+_Avoid_: portfolio view, book, blotter, dashboard state.
+
+**Domain Event**:
+A discrete, must-deliver fact Core's fold produced — order placed, fill applied,
+signal admitted/rejected, breach fired/cleared, cancelled-by-risk, alert —
+carried on one durable, ordered narrative stream for observers and audit. It
+surfaces the outcome of a Decision as a derived fact; the Decision itself stays
+internal and never reaches the Bus. Ordered, never coalesced.
+_Avoid_: notification, log entry, message, decision.
+
+**Telemetry**:
+Operational metrics of the machinery, not the business — per-topic throughput
+(messages/sec), signal- and order-generation rates, latencies, queue depths,
+process health. Sampled on wall-clock outside Core's deterministic fold, so it
+is not canonical state and is not Event-Log sequenced. Coalescing latest-value,
+like Business State, but instrumentation rather than business fact.
+_Avoid_: metrics, stats, monitoring data.
+
 ## Persistence & recovery
 
 **Event Log**:

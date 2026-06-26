@@ -2,7 +2,8 @@
 
 **Status:** Branch (A) — crate & dependency-graph revision — **closed 2026-06-24**
 (ADRs 0007–0009). Branch (B) — strategy runtime & multi-topic-join — **closed
-2026-06-25** (ADRs 0010–0013). Branch (C) Frontend/CLI remains.
+2026-06-25** (ADRs 0010–0013). Branch (C) — Frontend/CLI — **closed 2026-06-26**
+(ADRs 0014–0019). **All architecture branches closed.**
 
 ## The question
 
@@ -77,6 +78,35 @@ decided *not* to build — revising it is open branch (A) below.
   is a two-part handshake: Supervisor joins effectfully, then a logged "Strategy
   admitted" Core input makes the active-strategy set + limits deterministic. Fault
   isolation: freshness-reject + evict laggards; one-strategy-per-node default.
+- **[ADR-0014](../../adr/0014-observability-three-planes-deterministic-boundary.md)** —
+  Observability is three planes split on Core's deterministic boundary: **Business
+  State** (continuous, in-fold, seq-stamped coalescing snapshot) + **Domain Events**
+  (discrete, in-fold, durable curated narrative; Decisions stay internal, surfaced
+  as derived facts) + **Telemetry** (technical, out-of-fold, per-process). Read
+  path = push-spine + narrow query; observers never re-fold.
+- **[ADR-0015](../../adr/0015-off-thread-split-egress-observable-outputs.md)** —
+  Off-thread, split egress: the Kernel enqueues, a non-blocking forwarder
+  publishes. Coalescing latest-value snapshot (one atomic slot, seq-stamped) +
+  must-deliver durable Domain-Event channel + admission-bounded query channel.
+  Memory-boundedness is structural; replay path byte-identical (null sink).
+- **[ADR-0016](../../adr/0016-request-reply-over-bus-query-tiering.md)** —
+  Req/reply is a thin correlation layer over the Bus's pub/sub (no side-channel, no
+  native Bus method); one backend matrix. Queries tiered: push-spine → Kernel
+  non-logged read → repository / Event-Log store. Frontend reads never hit the
+  Event Log (only reconciliation responses do).
+- **[ADR-0017](../../adr/0017-frontend-control-plane-operational-only.md)** —
+  Frontend control is operational-only (lifecycle to Supervisor); no operator
+  trading (deferred to a Signal→risk seam). The one order-affecting control is an
+  emergency halt, modeled as a logged trip of risk's existing flatten authority.
+- **[ADR-0018](../../adr/0018-frontend-architecture-scopes-library-session.md)** —
+  Frontend = reusable `frontend-core` library + thin presentations (CLI first,
+  TUI/web later). Two scopes: host (always-on Supervisor) + Environment (one Core
+  namespace). Persistent interactive session + one-shot subcommands; one
+  Environment at a time; switch is first-class; discovery is Supervisor-driven.
+- **[ADR-0019](../../adr/0019-frontend-trust-boundary-host-os-mvp.md)** —
+  MVP trust boundary = host OS (Bus segment/socket perms); no app-level auth.
+  Identity/principal seam reserved; control already audited. Authn + authz tiering
+  arrive with the networked Bus, where the threat model actually changes.
 
 Glossary: **[CONTEXT.md](../../../CONTEXT.md)** (primitives, processes, messages,
 persistence/recovery, transport).
@@ -97,9 +127,11 @@ cross-process complexity to buy crash containment and hot-pluggability.
   (ADRs 0010–0013). Out-of-Core deterministic-fold strategies; capability-derived
   backtest fidelity; Environments & mode isolation; event-time fusion + parity/`L`;
   push framework, Signal-as-target, registration, fault isolation.
-- **(C) Frontend / CLI design** — the MVP CLI Frontend: observability + operational
-  control (no trading control — operator orders route through Signal→risk later);
-  query channels (req/resp to Core & Supervisor) and telemetry topics.
+- **(C) Frontend / CLI design** — ✅ **closed 2026-06-26** (ADRs 0014–0019).
+  Three-plane observability (Business State / Domain Events / Telemetry) on a
+  push-spine + narrow query; off-thread split egress; req/reply over the Bus;
+  operational-only control with halt-via-risk; `frontend-core` library + two
+  scopes + persistent session; host-OS trust boundary for MVP.
 
 ## Parked sub-questions (don't lose these)
 
@@ -107,9 +139,11 @@ cross-process complexity to buy crash containment and hot-pluggability.
 - Bus trait's **loan-vs-own** contract (design to the borrowed/lifecycle-bounded
   case to keep zero-copy).
 - Per-topic **delivery semantics** detail + backpressure / ring sizing.
-- **Req/resp pattern** (reconciliation queries, Frontend queries): the request is
-  effectful/live-only, the response enters Core as an ordered input; Bus-capability
-  vs side-channel TBD. _Registration is now a settled instance (ADR-0013)._
+- ~~**Req/resp pattern**~~ — **resolved (ADR-0016)**: req/reply is a thin
+  correlation layer over the Bus (not a side-channel); Frontend read-queries are
+  non-logged and tiered (push-spine → Kernel read → repository), while only a
+  reconciliation _response_ enters Core as an ordered input. _Registration was a
+  settled instance already (ADR-0013)._
 - **Event Log / repository backend**: parquet + DataFusion / DuckDB candidate
   (keep the log↔repository split from ADR-0009).
 - **Snapshot** cadence and contents (recovery substrate).
