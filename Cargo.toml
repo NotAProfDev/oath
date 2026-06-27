@@ -8,7 +8,7 @@ members = [
   "crates/net/core",
   "crates/bus/api",
   "crates/event-log/api",
-  "crates/persistence/core",
+  "crates/persistence/api",
   "crates/core/api",
   "crates/core/execution",
   "crates/core/portfolio",
@@ -38,7 +38,7 @@ oath-model = { path = "crates/model", version = "0.1.0" }
 oath-net-core = { path = "crates/net/core", version = "0.1.0" }
 oath-bus-api = { path = "crates/bus/api", version = "0.1.0" }
 oath-event-log-api = { path = "crates/event-log/api", version = "0.1.0" }
-oath-persistence-core = { path = "crates/persistence/core", version = "0.1.0" }
+oath-persistence-api = { path = "crates/persistence/api", version = "0.1.0" }
 oath-core-execution = { path = "crates/core/execution", version = "0.1.0" }
 oath-core-portfolio = { path = "crates/core/portfolio", version = "0.1.0" }
 oath-core-risk = { path = "crates/core/risk", version = "0.1.0" }

@@ -420,7 +420,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "oath-persistence-core"
+name = "oath-persistence-api"
 version = "0.1.0"
 dependencies = [
  "oath-model",
