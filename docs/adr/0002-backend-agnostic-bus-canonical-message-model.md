@@ -6,6 +6,11 @@ fast path; Unix sockets or Kafka for other users). There is exactly **one
 canonical message model** shared by every backend — backends differ only in how
 they move bytes, never in the data they carry.
 
+> _Refined by **ADR-0020**: the universal type bound is `Serialize` (POD is a
+> backend-specific zero-copy discipline, not a trait requirement), and the
+> per-topic delivery semantics below are realized as two classes (`LatestValue` /
+> `Reliable`) × two access patterns (keyed store / stream)._
+
 ## Considered options
 
 - *Per-backend data models* — rejected: it recreates, one layer up, the

@@ -8,8 +8,19 @@ trading engine. This file is a glossary only — no implementation details.
 **Symbol**:
 OATH's canonical identifier for a tradable instrument, independent of any one
 venue's ticker or internal id, so the same instrument offered by different
-brokers collapses to a single `Symbol` (e.g. via perm_id / OpenFIGI).
+brokers collapses to a single `Symbol` (e.g. via perm_id / OpenFIGI). `Symbol`
+is instrument _identity_ — used for positions, Signals, and risk — and is **not**
+a data-stream routing key: market-data streams are additionally keyed by their
+[Source], because the same `Symbol` priced by two Sources is two distinct streams.
 _Avoid_: ticker, instrument, contract (for the canonical form).
+
+**Source**:
+The Broker or Data-Provider Adapter that produced a given data stream — part of a
+market-data topic's routing key, never part of instrument identity. The same
+`Symbol` carried by two Sources is two distinct streams (different prices,
+timestamps, and gaps); a consolidated/NBBO view is a _derived_ stream, never raw
+per-Source topics conflated.
+_Avoid_: venue, feed, provider (for this routing-key role).
 
 **Price**:
 The value per unit of an instrument, expressed in its quote currency.
@@ -231,3 +242,17 @@ _Avoid_: simulation, paper trading, replay (for this).
 The transport over which processes exchange canonical messages. Backend-agnostic
 (e.g. shared-memory zero-copy, Unix sockets, Kafka) behind a single trait.
 _Avoid_: queue, channel, broker (reserved for the venue role above).
+
+**LatestValue**:
+A Bus delivery class: a **keyed store** of the latest value(s) per instance-key
+(depth ≥ 1), lossy and overwrite-allowed and **per-key isolated**, so a busy key
+never starves a quiet one. Read **by key** (with change-notification), never as a
+filtered firehose. Models current price/quote, order-book snapshot, position/P&L.
+_Avoid_: cache, snapshot (reserved for recovery), drop-to-latest (as a noun).
+
+**Reliable**:
+A Bus delivery class: an **ordered stream** in which no message is silently
+dropped — a full queue yields an explicit error, never a block and never a silent
+loss. Models every tick/fill/order/Domain Event.
+_Avoid_: durable (durability is the [Event Log]'s concern, not the Bus's),
+guaranteed.

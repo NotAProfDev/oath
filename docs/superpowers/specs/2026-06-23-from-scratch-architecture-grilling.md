@@ -3,7 +3,10 @@
 **Status:** Branch (A) — crate & dependency-graph revision — **closed 2026-06-24**
 (ADRs 0007–0009). Branch (B) — strategy runtime & multi-topic-join — **closed
 2026-06-25** (ADRs 0010–0013). Branch (C) — Frontend/CLI — **closed 2026-06-26**
-(ADRs 0014–0019). **All architecture branches closed.**
+(ADRs 0014–0019). **All architecture branches closed.** The **Bus-contract**
+parked-question cluster — **closed 2026-06-27** (ADRs 0020–0022): trait delivery
+classes × access patterns, two-level routing, and the `Reliable` order-path
+failure model.
 
 ## The question
 
@@ -136,9 +139,13 @@ cross-process complexity to buy crash containment and hot-pluggability.
 ## Parked sub-questions (don't lose these)
 
 - Schema **evolution/versioning** of `#[repr(C)]` POD messages (ADR-0002).
-- Bus trait's **loan-vs-own** contract (design to the borrowed/lifecycle-bounded
-  case to keep zero-copy).
-- Per-topic **delivery semantics** detail + backpressure / ring sizing.
+- ~~Bus trait's **loan-vs-own** contract~~ — **resolved (ADR-0020)**: public RAII
+  loan guard (degrading to owned), with mandated copy-out to owned `M: Copy` POD at
+  the retention / thread-hand-off / `.await` boundaries.
+- ~~Per-topic **delivery semantics** + backpressure / ring sizing~~ — **resolved
+  (ADR-0020 / 0022)**: two classes (`LatestValue` keyed store / `Reliable` stream);
+  `Reliable` overflow errors (never blocks, never silently drops) under a graduated
+  order-path ladder; routing is two-level (ADR-0021).
 - ~~**Req/resp pattern**~~ — **resolved (ADR-0016)**: req/reply is a thin
   correlation layer over the Bus (not a side-channel); Frontend read-queries are
   non-logged and tiered (push-spine → Kernel read → repository), while only a
