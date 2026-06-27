@@ -326,6 +326,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "oath-core"
+version = "0.1.0"
+dependencies = [
+ "oath-core-api",
+ "oath-core-execution",
+ "oath-core-kernel",
+ "oath-core-portfolio",
+ "oath-core-risk",
+ "oath-model",
+]
+
+[[package]]
 name = "oath-core-api"
 version = "0.1.0"
 dependencies = [
@@ -335,6 +347,15 @@ dependencies = [
 
 [[package]]
 name = "oath-core-execution"
+version = "0.1.0"
+dependencies = [
+ "oath-core-api",
+ "oath-model",
+ "thiserror",
+]
+
+[[package]]
+name = "oath-core-kernel"
 version = "0.1.0"
 dependencies = [
  "oath-core-api",
