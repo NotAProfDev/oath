@@ -8,6 +8,14 @@
 # in full on each container create.
 set -euo pipefail
 
+# --- Volume-backed build dir ownership ----------------------------------
+# target/ is a Docker named volume (see devcontainer.json `mounts`) for
+# native ext4 build I/O instead of the slow 9p bind mount. A fresh volume
+# mounts as root, so hand it to the non-root `vscode` user before any build
+# writes to it. Idempotent: a no-op once the volume is already owned.
+sudo mkdir -p /workspaces/oath/target
+sudo chown vscode:vscode /workspaces/oath/target
+
 # --- System packages (Debian trixie) ------------------------------------
 # libclang-dev: bindgen/libclang for iceoryx2 build scripts.
 # gitleaks, just, shellcheck: security scan, task runner, shell-hook linter.
