@@ -326,6 +326,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "oath-adapter-api"
+version = "0.1.0"
+dependencies = [
+ "oath-model",
+ "thiserror",
+]
+
+[[package]]
 name = "oath-adapter-net-api"
 version = "0.1.0"
 dependencies = [
@@ -342,6 +350,13 @@ version = "0.1.0"
 dependencies = [
  "oath-model",
  "thiserror",
+]
+
+[[package]]
+name = "oath-cli"
+version = "0.1.0"
+dependencies = [
+ "oath-model",
 ]
 
 [[package]]
@@ -433,6 +448,21 @@ version = "0.1.0"
 dependencies = [
  "oath-model",
  "thiserror",
+]
+
+[[package]]
+name = "oath-strategy-host"
+version = "0.1.0"
+dependencies = [
+ "oath-model",
+ "oath-strategy-api",
+]
+
+[[package]]
+name = "oath-supervisor"
+version = "0.1.0"
+dependencies = [
+ "oath-model",
 ]
 
 [[package]]
