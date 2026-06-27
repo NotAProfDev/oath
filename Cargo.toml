@@ -13,7 +13,6 @@ members = [
   "crates/portfolio/core",
   "crates/risk/core",
   "crates/strategy/core",
-  "crates/engine",
 ]
 
 # --- Package metadata ---
