@@ -43,16 +43,23 @@ graph TD
     netapi[oath-adapter-net-api]
 
     risk[oath-core-risk] --> coreapi
+    risk --> model
     exe[oath-core-execution] --> coreapi
+    exe --> model
     por[oath-core-portfolio] --> coreapi
+    por --> model
     kernel[oath-core-kernel] --> coreapi
+    kernel --> model
 
     core[oath-core] --> kernel
     core --> risk
     core --> exe
     core --> por
+    core --> coreapi
+    core --> model
 
     strathost[oath-strategy-host] --> stratapi
+    strathost --> model
     cli[oath-cli] --> model
     sup[oath-supervisor] --> model
 ```
