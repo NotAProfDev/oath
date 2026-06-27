@@ -74,9 +74,20 @@ with this:
 
 - [ ] **Step 2: Verify the file is still valid JSONC**
 
-Run: `python3 -c "import json,re,sys; s=open('.devcontainer/devcontainer.json').read(); s=re.sub(r'(^|\s)//.*$','',s,flags=re.M); print('valid JSON' if json.loads(s) is not None or True else '')"`
+Authoritative check: open `.devcontainer/devcontainer.json` in the editor — its
+built-in JSONC language service flags stray/missing commas and brackets inline.
+(The container rebuild in Task 3 is the ultimate validator; the devcontainer CLI
+rejects malformed config.)
 
-Expected: prints `valid JSON` with no traceback. (The regex strips `//` line comments before parsing; a `JSONDecodeError` here means a stray/missing comma — fix it before continuing.)
+Optional quick smoke test (bracket/comma sanity only): strip line comments and
+parse —
+
+`python3 -c "import json,re; s=open('.devcontainer/devcontainer.json').read(); s=re.sub(r'(^|\s)//.*$','',s,flags=re.M); json.loads(s); print('parses')"`
+
+Expected: prints `parses`. Caveat: this regex is *not* JSONC-aware — it can
+misparse a `//` that appears inside a string value, so a failure here is only
+meaningful after confirming no string contains ` //`. Trust the editor/rebuild
+over this check.
 
 - [ ] **Step 3: Commit**
 

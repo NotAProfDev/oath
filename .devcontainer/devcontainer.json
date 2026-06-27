@@ -7,9 +7,9 @@
   // tag that mcr.microsoft.com/devcontainers/rust tracks), so the container ships
   // the same Rust as rust-toolchain.toml and CI — one toolchain, no drift. Bump
   // in lockstep with rust-toolchain.toml and the dtolnay ref in ci.yml. A Rust
-  // bump should be paired with `docker volume rm oath-cargo-cache-*`: a persisted
-  // cargo volume (below) is reused as-is and would otherwise shadow the new
-  // image's /usr/local/cargo.
+  // bump should be paired with dropping the persisted cargo volume (below) —
+  // `docker volume ls -q --filter name=oath-cargo-cache | xargs -r docker volume rm`
+  // — otherwise it is reused as-is and shadows the new image's /usr/local/cargo.
   "image": "rust:1.96.0-trixie",
   // Keep source on the (9p) Windows bind mount, but redirect Rust's
   // write-heavy dirs to native Docker named volumes for fast build I/O.
@@ -17,7 +17,8 @@
   // survive rebuilds. On non-WSL hosts (native Linux/macOS) the workspace is
   // already a fast bind mount, so these dirs just move off the host filesystem:
   // builds still work, but `target/` is no longer browsable from the host;
-  // reclaim either volume with `docker volume rm oath-*`.
+  // reclaim with `docker volume ls -q --filter name=oath- | xargs -r docker volume rm`
+  // (the `${devcontainerId}` suffix means the exact names aren't fixed).
   // See docs/superpowers/plans/2026-06-27-devcontainer-volume-cache.md
   "mounts": [
     // Compiler output: thousands of small writes — the main 9p bottleneck.
