@@ -8,14 +8,28 @@
   // the same Rust as rust-toolchain.toml and CI — one toolchain, no drift. Bump
   // in lockstep with rust-toolchain.toml and the dtolnay ref in ci.yml.
   "image": "rust:1.96.0-trixie",
-  // Use 'mounts' to make the cargo cache persistent in a Docker Volume.
-  // "mounts": [
-  // 	{
-  // 		"source": "devcontainer-cargo-cache-${devcontainerId}",
-  // 		"target": "/usr/local/cargo",
-  // 		"type": "volume"
-  // 	}
-  // ]
+  // Keep source on the (9p) Windows bind mount, but redirect Rust's
+  // write-heavy dirs to native Docker named volumes for fast build I/O.
+  // Volumes are scoped per devcontainer config via ${devcontainerId} and
+  // survive rebuilds. See docs/superpowers/plans/2026-06-27-devcontainer-volume-cache.md
+  "mounts": [
+    // Compiler output: thousands of small writes — the main 9p bottleneck.
+    // Absent from the image, so this volume starts empty + root-owned;
+    // post-create.sh chowns it to `vscode`.
+    {
+      "source": "oath-target-${devcontainerId}",
+      "target": "/workspaces/oath/target",
+      "type": "volume"
+    },
+    // Crate registry + tools installed by post-create.sh. Docker populates
+    // this volume from the image's /usr/local/cargo (perms preserved), so it
+    // also persists `cargo install` output across rebuilds.
+    {
+      "source": "oath-cargo-cache-${devcontainerId}",
+      "target": "/usr/local/cargo",
+      "type": "volume"
+    }
+  ],
   "features": {
     // The official rust:<version> image runs as root with a minimal toolchain.
     // common-utils + rust recreate the non-root dev setup that
