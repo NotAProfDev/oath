@@ -95,6 +95,7 @@ body:
         - "oath-persistence"
         - "oath-core"
         - "oath-adapter"
+        - "oath-adapter-net-api"
         - "oath-strategy"
         - "oath-cli"
         - "oath-supervisor"
