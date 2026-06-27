@@ -5,15 +5,21 @@
 resolver = "3"
 members = [
   "crates/model",
-  "crates/net/core",
-  "crates/messaging/core",
-  "crates/persistence/core",
-  "crates/ingest/core",
-  "crates/execution/core",
-  "crates/portfolio/core",
-  "crates/risk/core",
-  "crates/strategy/core",
-  "crates/engine",
+  "crates/adapter/net/api",
+  "crates/bus/api",
+  "crates/event-log/api",
+  "crates/persistence/api",
+  "crates/core/api",
+  "crates/core/execution",
+  "crates/core/portfolio",
+  "crates/core/risk",
+  "crates/core/kernel",
+  "crates/core/host",
+  "crates/strategy/api",
+  "crates/adapter/api",
+  "crates/strategy/host",
+  "crates/cli",
+  "crates/supervisor",
 ]
 
 # --- Package metadata ---
@@ -33,14 +39,17 @@ categories = ["finance", "asynchronous"]
 # Internal crates — version is required so cargo-deny can resolve the dep and
 # does not treat { workspace = true } path deps as wildcard requirements.
 oath-model = { path = "crates/model", version = "0.1.0" }
-oath-net-core = { path = "crates/net/core", version = "0.1.0" }
-oath-messaging-core = { path = "crates/messaging/core", version = "0.1.0" }
-oath-persistence-core = { path = "crates/persistence/core", version = "0.1.0" }
-oath-ingest-core = { path = "crates/ingest/core", version = "0.1.0" }
-oath-execution-core = { path = "crates/execution/core", version = "0.1.0" }
-oath-portfolio-core = { path = "crates/portfolio/core", version = "0.1.0" }
-oath-risk-core = { path = "crates/risk/core", version = "0.1.0" }
-oath-strategy-core = { path = "crates/strategy/core", version = "0.1.0" }
+oath-adapter-net-api = { path = "crates/adapter/net/api", version = "0.1.0" }
+oath-bus-api = { path = "crates/bus/api", version = "0.1.0" }
+oath-event-log-api = { path = "crates/event-log/api", version = "0.1.0" }
+oath-persistence-api = { path = "crates/persistence/api", version = "0.1.0" }
+oath-core-execution = { path = "crates/core/execution", version = "0.1.0" }
+oath-core-portfolio = { path = "crates/core/portfolio", version = "0.1.0" }
+oath-core-risk = { path = "crates/core/risk", version = "0.1.0" }
+oath-strategy-api = { path = "crates/strategy/api", version = "0.1.0" }
+oath-adapter-api = { path = "crates/adapter/api", version = "0.1.0" }
+oath-core-api = { path = "crates/core/api", version = "0.1.0" }
+oath-core-kernel = { path = "crates/core/kernel", version = "0.1.0" }
 
 # External shared — backend-specific deps belong in individual crate Cargo.toml files
 bytes = "1"
