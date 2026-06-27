@@ -8,7 +8,14 @@ parked-question cluster — **closed 2026-06-27** (ADRs 0020–0022): trait deli
 classes × access patterns, two-level routing, and the `Reliable` order-path
 failure model. **Numeric types** parked question — **closed 2026-06-27**
 (ADR-0023): fixed-point always-`i128`, exact/analytical two-domain split,
-instrument-sourced precision, checked money ops.
+instrument-sourced precision, checked money ops. **Symbology** parked question —
+**closed 2026-06-27** (ADR-0025): self-_identifying_ `InstrumentId` (externally
+anchored / venue-qualified fallback, never guess a collapse), off-wire `Instrument`
+reference record, fixed-size name on the wire, deterministic rule + curated mapping,
+logged resolution + lifecycle. It also reopened and refined **ADR-0011 → ADR-0024**
+(an Environment binds **one-or-more same-safety-class** execution backends, so
+cross-broker risk is in-fold; shadow/live/off is per-strategy **targeting**, not an
+in-Core tag) and added glossary `Account` / `Position`.
 
 ## The question
 
@@ -156,8 +163,24 @@ cross-process complexity to buy crash containment and hot-pluggability.
 - **Event Log / repository backend**: parquet + DataFusion / DuckDB candidate
   (keep the log↔repository split from ADR-0009).
 - **Snapshot** cadence and contents (recovery substrate).
-- **Symbology** design: canonical identity (perm_id/OpenFIGI) + per-adapter
-  mapping.
+- ~~**Symbology** design: canonical identity (perm_id/OpenFIGI) + per-adapter
+  mapping.~~ — **resolved (ADR-0025)**: **`InstrumentId`** = self-_identifying_
+  canonical identity (externally-anchored ISIN/FIGI/OCC where it exists,
+  venue-qualified fallback, **never guess a collapse**); **`Symbol`** demoted to venue
+  ticker. Off-wire **`Instrument`** record keyed `(InstrumentId, Source)` (shared core
+  + per-asset-class typed tail) is the single home for ADR-0023 precision. Wire form =
+  fixed-size self-identifying name (Choice A; local-only interning). Mapping =
+  deterministic versioned rule + curated overrides + cross-`Source` price-plausibility
+  monitor. Resolution + lifecycle (immutable id + logged succession; corporate actions
+  as Core inputs; time-versioned metadata) are **logged Core inputs**. _Also drove
+  **ADR-0024** (multi-broker same-safety-class Environments; shadow = targeting) and
+  added glossary `Account` / `Position`._
+  - **New parked sub-questions:** fixed-size id **length** vs real IBKR contracts;
+    **combo identity** (structural-encode vs leg-decompose); **central security-master**
+    service (production-grade evolution of the resolution/curation seam — additive,
+    does not change identity); **OpenFIGI** anchor-lookup fallback; the
+    **corporate-action taxonomy** + succession UX; durable **`Instrument` store** as
+    part of the Event-Log / repository backend decision.
 - ~~`Price`/`Quantity` numeric needs per asset class (crypto/wei) — when to move
   the inner type off `rust_decimal`.~~ — **resolved (ADR-0023)**: drop
   `rust_decimal`; fixed-point **always-`i128`** on the wire (`Price` signed,

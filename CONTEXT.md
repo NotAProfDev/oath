@@ -5,22 +5,54 @@ trading engine. This file is a glossary only — no implementation details.
 
 ## Domain primitives
 
+**InstrumentId**:
+OATH's canonical, **venue-independent identity** for a tradable instrument,
+independent of any one venue's ticker or internal id, so the same instrument
+offered by different brokers collapses to a single `InstrumentId` — anchored, where
+one exists, on an external standard (FIGI/ISIN-level), and **venue-qualified** where
+no venue-independent identity exists, but always _normalized_, never a raw broker
+string. It is the key for [Position]s (together with [Account]), [Signal]s, and
+risk, and is **not** a data-stream routing key: market-data streams are
+additionally keyed by their [Source], because the same `InstrumentId` priced by two
+Sources is two distinct streams. **Self-identifying** — a stable, standards-based
+(e.g. ISIN/FIGI/OCC) or deterministically-derived denotation that needs **no
+OATH-private id registry** to say _which_ instrument it is, and never drifts, so the
+Event Log stays interpretable forever. This is distinct from _self-explaining_: the
+attributes (tick, currency, underlying, strike) still live in the [Instrument]
+record, which is reference data _about_ an already-identified instrument, **not** a
+fragile id↔meaning table.
+_Avoid_: symbol, ticker, instrument, contract (for the identity).
+
 **Symbol**:
-OATH's canonical identifier for a tradable instrument, independent of any one
-venue's ticker or internal id, so the same instrument offered by different
-brokers collapses to a single `Symbol` (e.g. via perm_id / OpenFIGI). `Symbol`
-is instrument _identity_ — used for positions, Signals, and risk — and is **not**
-a data-stream routing key: market-data streams are additionally keyed by their
-[Source], because the same `Symbol` priced by two Sources is two distinct streams.
-_Avoid_: ticker, instrument, contract (for the canonical form).
+The human-facing **ticker/label** for an instrument as a venue names it ("AAPL",
+"ESM4") — a display attribute carried on the [Instrument] record, **never** the
+identity (that is [InstrumentId]). Two venues may use different Symbols for the same
+`InstrumentId`, and the same Symbol string can mean different instruments at
+different venues — which is exactly why it cannot be the identity.
+_Avoid_: identifier, id, key (for this label sense).
 
 **Source**:
 The Broker or Data-Provider Adapter that produced a given data stream — part of a
 market-data topic's routing key, never part of instrument identity. The same
-`Symbol` carried by two Sources is two distinct streams (different prices,
+[InstrumentId] carried by two Sources is two distinct streams (different prices,
 timestamps, and gaps); a consolidated/NBBO view is a _derived_ stream, never raw
 per-Source topics conflated.
 _Avoid_: venue, feed, provider (for this routing-key role).
+
+**Instrument**:
+The resolved _reference-data_ record for an [InstrumentId] — its [Symbol] (the
+venue ticker), tick size, lot/min size, multiplier (contract size), quote currency,
+asset class, and later expiry/strike/right/underlying. It is **not** identity (that
+is [InstrumentId]) and never travels on the wire or the Event Log: ADR-0023 keeps
+[Price]/[Quantity] precision-free raw `i128`/`u128`, and the `Instrument` is the
+single home for the precision used to interpret them. The adapter **resolves it once
+at the boundary** from a [Source]'s symbology / contract details, caches it, and any
+consumer needing precision (order emission, display) looks it up. Resolution is keyed
+by `InstrumentId` **per [Source]** — contract facts like tick can differ across
+venues, so the same `InstrumentId` from two Sources may resolve to two `Instrument`s,
+exactly as it is two market-data streams.
+_Avoid_: contract, security, product (for this record); do not conflate with
+[InstrumentId] (identity) or [Symbol] (ticker).
 
 **Price**:
 The value per unit of an instrument, expressed in its quote currency. Can be
@@ -38,6 +70,24 @@ _Avoid_: size, amount, volume; a "signed quantity".
 **Side**:
 The direction of an order or trade — buy or sell.
 _Avoid_: direction, way, sign.
+
+**Account**:
+A specific trading account at a [Broker] that owns [Position]s and receives
+[Fill]s — the unit OATH settles, margins, and flattens against. Its identity is a
+**normalized composite that includes the [Source]**, because account ids are only
+unique within a broker (account `U123` at broker A is unrelated to `U123` at
+broker B), and one Broker may expose **several** Accounts. There is no cross-broker
+account consistency.
+_Avoid_: portfolio, wallet, login, subaccount (for the canonical term).
+
+**Position**:
+The held exposure in one [InstrumentId] at one [Account] — a [Quantity] magnitude
+plus the [Side] that signs it, with signed exposure and average price derived. Keyed
+by **`(Account, InstrumentId)`** and **never netted across Accounts**: a long at one broker
+and a short at another are two Positions you must flatten separately, not a flat
+zero. Net exposure across Accounts, brokers, or asset classes is a **derived
+roll-up**, never a stored Position.
+_Avoid_: holding, balance, inventory (for the canonical term).
 
 **Timestamp**:
 A point in time, always UTC, with no timezone or offset attached.
@@ -122,11 +172,18 @@ _Avoid_: UI, dashboard, console, client.
 
 **Environment**:
 An isolated instance of the OATH topology — its own Core, Event Log,
-portfolio/risk state, execution-adapter binding, data feeds, and Bus namespace —
-so that several can run on one host without their orders, fills, positions, or
-logs colliding. Its mode is its data feed × execution backend (e.g. live feed ×
-live account); all its feeds share one temporal profile (real-time, delayed-by-D,
-or historical).
+portfolio/risk state, data feeds, and Bus namespace — so that several run on one
+host without their orders, fills, positions, or logs colliding. An Environment
+occupies **one cell of the mode matrix**: a single **temporal profile** (real-time,
+delayed-by-D, or historical) × a single execution **safety-class** (Simulated,
+Paper, or Live). Within that cell it may bind **one or more execution backends of
+the same safety-class** (e.g. two Live brokers), so cross-broker [Position]s and
+risk are evaluated in **one Core** over the canonical [InstrumentId]. A differing
+temporal profile or safety-class **always** forces a separate Environment (a
+Simulated or Paper [Fill] must never perturb Live risk); same-cell books may still
+be split into separate Environments **by choice** for risk isolation. Brokers
+co-bound into one Environment **share its fate** — a Core fault or [Emergency Halt]
+touches all of them.
 _Avoid_: instance, deployment, tenant, session.
 
 **Simulated Broker**:
@@ -156,7 +213,7 @@ _Avoid_: production, real-money mode.
 
 **Signal**:
 A Strategy's proposal of a _desired target_ — the position or exposure it wants
-in a `Symbol` — submitted to Core for a decision, never an Order. Idempotent and
+in an [InstrumentId] — submitted to Core for a decision, never an Order. Idempotent and
 nettable: Core reconciles actual → target across strategies under risk, deciding
 whether, when, and how much to act. Carries the as-of freshness it was decided
 under and the proposing Strategy's identity.
@@ -179,7 +236,7 @@ _Avoid_: execution, trade, transaction.
 
 **Emergency Halt**:
 An operator-tripped switch that puts Core's Risk Engine into cancel-all / flatten
-mode — operational safety, not operator trading: it picks no Symbol, Side, or
+mode — operational safety, not operator trading: it picks no InstrumentId, Side, or
 Quantity, only invoking risk's existing authority (a control of the risk loop, not
 an Order). The Supervisor performs the effectful trip and emits a logged Core
 input, so it is deterministic and replayable.
