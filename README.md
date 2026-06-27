@@ -13,57 +13,58 @@ Every subsystem is defined behind a trait. Backends, adapters, transports, and s
 
 | Crate | Purpose |
 |---|---|
-| `oath-model` | Shared domain primitives: `Symbol`, `Price`, `Quantity`, `Timestamp`, `Side` |
-| `oath-net-core` | HTTP and WebSocket client traits |
-| `oath-messaging-core` | Message bus, event publishing and subscribing |
-| `oath-persistence-core` | Repository and event log traits |
-| `oath-ingest-core` | Market data feed: quotes, trades, bars |
-| `oath-execution-core` | Order lifecycle, fills, execution reports |
-| `oath-portfolio-core` | Positions, P&L, account management |
-| `oath-risk-core` | Risk checks, risk engine, verdicts |
-| `oath-strategy-core` | User-facing `Strategy` trait and signals |
-| `oath-engine` | Composes all layers via `EngineBuilder` |
+| `oath-model` | Canonical domain primitives and message payloads — the root contract |
+| `oath-bus-api` | Bus trait: backend-agnostic transport (LatestValue / Reliable classes) |
+| `oath-event-log-api` | Event Log + Snapshot traits: the ordered recovery spine |
+| `oath-persistence-api` | Repository trait: keyed, queryable read-models and dedup tables |
+| `oath-core-api` | Core trait hub: `StateView`, `Decision`, `ActionSink`, the Policy contracts |
+| `oath-core-risk` / `-execution` / `-portfolio` | Policy implementations bound by the Core binary |
+| `oath-core-kernel` | The `Kernel<R, E, P>` single-writer loop |
+| `oath-core` | The Core process binary |
+| `oath-adapter-api` | Harness + `Broker` / `DataProvider` traits for venue adapters |
+| `oath-adapter-net-api` | HTTP/WS composition primitives (`Service`, `Layer`) for adapters |
+| `oath-strategy-api` | User-facing `Strategy` trait and Signal types |
+| `oath-strategy-host` | Strategy Node binary: hosts user strategies, isolated from Core |
+| `oath-cli` | The first Frontend (MVP) |
+| `oath-supervisor` | Operational-plane process: boots and watches the topology |
 
 ## Dependency Graph
 
 ```mermaid
 graph TD
     model[oath-model]
-    net[oath-net-core]
-    msg[oath-messaging-core]
-    per[oath-persistence-core]
-    ing[oath-ingest-core]
-    exe[oath-execution-core]
-    por[oath-portfolio-core]
-    risk[oath-risk-core]
-    strat[oath-strategy-core]
-    eng[oath-engine]
 
-    net --> model
-    msg --> model
-    per --> model
-    ing --> model
-    exe --> model
-    por --> model
-    por --> exe
+    busapi[oath-bus-api] --> model
+    evlog[oath-event-log-api] --> model
+    perapi[oath-persistence-api] --> model
+    coreapi[oath-core-api] --> model
+    adapterapi[oath-adapter-api] --> model
+    stratapi[oath-strategy-api] --> model
+    netapi[oath-adapter-net-api]
+
+    risk[oath-core-risk] --> coreapi
     risk --> model
-    risk --> exe
-    risk --> por
-    strat --> model
-    strat --> ing
-    strat --> exe
-    strat --> por
-    eng --> net
-    eng --> msg
-    eng --> per
-    eng --> ing
-    eng --> exe
-    eng --> por
-    eng --> risk
-    eng --> strat
+    exe[oath-core-execution] --> coreapi
+    exe --> model
+    por[oath-core-portfolio] --> coreapi
+    por --> model
+    kernel[oath-core-kernel] --> coreapi
+    kernel --> model
+
+    core[oath-core] --> kernel
+    core --> risk
+    core --> exe
+    core --> por
+    core --> coreapi
+    core --> model
+
+    strathost[oath-strategy-host] --> stratapi
+    strathost --> model
+    cli[oath-cli] --> model
+    sup[oath-supervisor] --> model
 ```
 
-Backend crates (e.g. `oath-net-reqwest`, `oath-messaging-memory`, `oath-persistence-sqlite`) and adapter crates (e.g. `oath-adapter-ibkr`) are coming soon.
+The crates above are compiling skeletons. Bus/Event-Log/persistence backends (e.g. `oath-bus-iceoryx2`, `oath-event-log-chronicle`, `oath-persistence-sqlite`) and venue adapters (e.g. `oath-adapter-ibkr`) are coming soon.
 
 ## Setup
 

@@ -7,12 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Restructured the workspace to the process-aligned, spine-inverted crate topology
+  of ADR-0009: deleted `oath-engine` and `oath-ingest-core`; split
+  `oath-messaging-core` into `oath-bus-api` + `oath-event-log-api`; renamed the
+  `*-core` trait crates to `<subsystem>/api`; moved the risk/execution/portfolio
+  Policies under `core/`; relocated `oath-net-core` to `oath-adapter-net-api`; and
+  added `oath-core-api`, `oath-core-kernel`, and the `oath-core`, `oath-strategy-host`,
+  `oath-cli`, and `oath-supervisor` process crates.
+
 ### Added
 
-- Cargo workspace scaffold with 10 domain crates:
-  `oath-model`, `oath-net-core`, `oath-messaging-core`, `oath-persistence-core`,
-  `oath-ingest-core`, `oath-execution-core`, `oath-portfolio-core`, `oath-risk-core`,
-  `oath-strategy-core`, `oath-engine`.
+- Cargo workspace scaffold (initial 10 domain crates; later restructured — see Changed).
 - Workspace-level lint configuration: `rustc`, `clippy` (all, pedantic, nursery, cargo,
   and selected restriction-group lints), with test-code exemptions via `.clippy.toml`.
 - Build profiles: `release` (LTO + abort-on-panic), `profiling`, `bench`.
