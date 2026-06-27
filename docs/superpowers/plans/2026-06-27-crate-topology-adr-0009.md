@@ -1342,8 +1342,10 @@ graph TD
     core --> risk
     core --> exe
     core --> por
+    core --> model
 
     strathost[oath-strategy-host] --> stratapi
+    strathost --> model
     cli[oath-cli] --> model
     sup[oath-supervisor] --> model
 ```
@@ -1455,7 +1457,7 @@ Expected: all gates pass — crucially `typos` (new prose), `doc` (no broken int
 cargo metadata --format-version 1 --no-deps | jq -r '.packages[].name' | sort
 ```
 Expected — exactly these 16 names:
-```
+```text
 oath-adapter-api
 oath-adapter-net-api
 oath-bus-api
@@ -1478,7 +1480,7 @@ And the directory layout:
 find crates -name Cargo.toml | sort
 ```
 Expected:
-```
+```text
 crates/adapter/api/Cargo.toml
 crates/adapter/net/api/Cargo.toml
 crates/bus/api/Cargo.toml

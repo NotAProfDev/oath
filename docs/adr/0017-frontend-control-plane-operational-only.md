@@ -11,9 +11,9 @@ path ever bypasses risk. The one order-affecting control in MVP is an **emergenc
 halt**, modeled not as operator trading but as a **trip of the Risk Engine's
 existing cancel-all / flatten authority** (ADR-0004): the operator picks no
 instrument and no size, only trips the switch. Mechanically it follows ADR-0013's
-registration template — the Supervisor performs the effectful trip, then emits a
-logged "halt as-of seq N" fact into Core's Event Log — so the halt is
-deterministic, replayable, and attributable.
+registration template — the Supervisor durably records the "halt as-of seq N"
+fact into Core's Event Log before (or as part of) the effectful trip — so the
+halt is deterministic, replayable, and attributable even across a crash.
 
 ## Considered options
 

@@ -19,9 +19,9 @@ they move bytes, never in the data they carry.
 
 ## Consequences
 
-- Message payloads are designed to the **intersection** of backend constraints:
-  fixed-layout, `#[repr(C)]` plain-old-data (for zero-copy) **and** serializable
-  (for network backends) — roughly a `Pod + Serialize` bound.
+- Message payloads are `Serialize` (the shared trait bound); backends that
+  support zero-copy may additionally impose fixed-layout, `#[repr(C)]`
+  plain-old-data (POD) constraints as backend-specific discipline (ADR-0020).
 - The trait must be designed to the **stricter** ownership contract: zero-copy
   hands back a *loaned*, lifetime-bounded sample; network backends hand back an
   *owned* value. Modelling the borrowed/lifecycle-bounded case keeps zero-copy.

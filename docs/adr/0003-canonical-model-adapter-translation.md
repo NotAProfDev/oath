@@ -13,9 +13,8 @@ risk.
 
 - Every adapter carries a translation layer (precision conversion, symbol
   resolution, mapping tables) — accepted cost, paid to keep the core clean.
-- `Price`/`Quantity` are newtypes over a swappable inner numeric type
-  (`rust_decimal` for the MVP — 16-byte, `Copy`, heap-free, so zero-copy-safe);
-  the inner type can later become fixed-point `i64` or a bignum at compile time
-  without touching call sites.
+- `Price`/`Quantity` are newtypes over a swappable inner numeric type, so the
+  representation can change at compile time without touching call sites (later
+  settled on fixed-point `i128`/`u128` — ADR-0023).
 - Translation lives in the adapter process, so a malformed-message bug in one
   venue's translation cannot corrupt another's.

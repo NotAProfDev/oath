@@ -5,7 +5,8 @@ The strategy framework delivers a strategy's subscribed Bus topics as a single
 read-only **latest-value view** (the `StateView` analogue, ADR-0008); windowed /
 correlation joins are strategy-owned state for MVP. Live ordering uses a
 configurable per-Environment **lateness bound `L`** (default small; `L = 0` for
-latency-critical Live), so the live decision path adds no buffering latency, and
+latency-critical Live), so latency-critical Live can set `L = 0` to avoid
+buffering while `L > 0` buffers the live decision path by up to `L`, and
 each Environment records its consumed input stream in **ingestion order** (a compact
 index over the durable Bus topics) so a recorded run replays bit-exactly regardless
 of `L`.

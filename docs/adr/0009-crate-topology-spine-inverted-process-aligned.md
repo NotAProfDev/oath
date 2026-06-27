@@ -20,7 +20,7 @@ Two naming rules make the structure self-describing:
 
 ## Target layout
 
-```
+```text
 crates/
   model/                    oath-model              primitives + message payloads
 

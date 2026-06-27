@@ -14,10 +14,10 @@ So an Environment occupies **one cell of the mode matrix** — `(temporal profil
 execution safety-class: Simulated | Paper | Live)` — and within that cell binds
 **one or more execution backends of the same safety-class**. Multiple Live brokers
 (e.g. IBKR + Coinbase) co-bind into one Core, which makes **cross-broker net
-exposure, global per-`Symbol` position tracking, and cross-asset budget rules**
+exposure, global per-`InstrumentId` position tracking, and cross-asset budget rules**
 (e.g. FX-50 % / equity-50 %) **first-class, in-fold risk** over the canonical
-`Symbol` — not a derived cross-Environment view. [Position]s remain keyed
-`(Account, Symbol)` and are **never netted across [Account]s**; the risk fold
+`InstrumentId` — not a derived cross-Environment view. [Position]s remain keyed
+`(Account, InstrumentId)` and are **never netted across [Account]s**; the risk fold
 aggregates over them.
 
 Cross-cell still always separates: a differing temporal profile or safety-class
@@ -56,8 +56,8 @@ a conditional the Live Core must evaluate correctly.
   Environments.
 - **`Account` becomes a first-class key** (new glossary term): a normalized
   composite that includes [Source], with several allowed per [Broker]; Positions are
-  keyed `(Account, Symbol)`, never netted across Accounts.
-- **Canonical `Symbol` is promoted to an in-fold risk key**, not merely a Frontend
+  keyed `(Account, InstrumentId)`, never netted across Accounts.
+- **Canonical `InstrumentId` is promoted to an in-fold risk key**, not merely a Frontend
   join key — which directly shapes the symbology layer (the next thread).
 - **Promotion shadow → live is a lifecycle re-registration** (ADR-0013 admission,
   ADR-0017 control), deliberately *not* a one-click flag — going from zero-capital to

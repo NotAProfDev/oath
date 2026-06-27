@@ -23,9 +23,10 @@ convention so they ride every backend including the fast path; user-defined
 messages need only `Serialize` (and opt into a backend's discipline for its fast
 path). **Receive is a loan guard** (`Sample<M>: Deref<Target = M>`, drop returns
 the slot) — a real shared-memory loan where the backend supports it, an owned value
-otherwise. A loan **may not cross three boundaries** — retention, thread hand-off,
-`.await` — at each of which the consumer copies out to **owned `M: Copy` POD** and
-drops the loan. (Core's drain — read field, append bytes to the Event Log, fold,
+otherwise. A loaned `Sample<M>` **may not cross** retention, thread hand-off, or
+`.await`; the consumer **materializes it into an owned payload** before each
+boundary, then drops the loan (owned payloads move normally — `Copy` POD is a
+backend-specific fast-path discipline, not a public-API bound). (Core's drain — read field, append bytes to the Event Log, fold,
 drop — is the inspect-and-discard hot path that earns the guard its public place.)
 **Send is `publish(&M)`**; **loan-to-write (`SampleMut<M>`) is an opt-in**
 zero-copy-construct path for large/bulk payloads (order-book depth, history pages).
