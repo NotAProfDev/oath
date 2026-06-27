@@ -4,13 +4,16 @@ Guidance for Claude Code working in **OATH** (Open Automatic Trading Hub),
 a modular, backend-agnostic Rust trading engine. For architecture and the crate
 dependency graph, see [README.md](README.md).
 
-## Status: core trait crates defined, backends not yet built
+## Status: spine-inverted crate skeletons in place, contents not yet built
 
-The Cargo workspace and the ten trait-defining `*-core` crates (`oath-model` →
-`oath-engine`) are in place, along with the full dev tooling (`justfile`,
-`.githooks/`, lint config). Backend and adapter crates (e.g. `oath-net-reqwest`,
-`oath-persistence-sqlite`, `oath-adapter-ibkr`) are **not yet built**. The project
-is pre-release — see the "do not use" notice in the README.
+The Cargo workspace follows the process-aligned, spine-inverted crate topology of
+[ADR-0009](docs/adr/0009-crate-topology-spine-inverted-process-aligned.md):
+`oath-model` is the root contract; `<subsystem>/api` crates define traits; `core/`
+holds the Core process (`core/kernel` + Policies + the `oath-core` binary); and
+`adapter/`, `strategy/`, `cli/`, and `supervisor/` are the other process roles. The
+crates are compiling skeletons — trait bodies, the Kernel loop, Policies, and all
+backends/adapters are **not yet built**. The project is pre-release — see the "do
+not use" notice in the README.
 
 ## Development workflow
 
