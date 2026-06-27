@@ -326,6 +326,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "oath-bus-api"
+version = "0.1.0"
+dependencies = [
+ "oath-model",
+ "thiserror",
+]
+
+[[package]]
 name = "oath-core"
 version = "0.1.0"
 dependencies = [
@@ -382,7 +390,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "oath-messaging-core"
+name = "oath-event-log-api"
 version = "0.1.0"
 dependencies = [
  "oath-model",
