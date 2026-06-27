@@ -8,6 +8,7 @@ members = [
   "crates/net/core",
   "crates/messaging/core",
   "crates/persistence/core",
+  "crates/core/api",
   "crates/execution/core",
   "crates/portfolio/core",
   "crates/risk/core",
@@ -38,6 +39,7 @@ oath-execution-core = { path = "crates/execution/core", version = "0.1.0" }
 oath-portfolio-core = { path = "crates/portfolio/core", version = "0.1.0" }
 oath-risk-core = { path = "crates/risk/core", version = "0.1.0" }
 oath-strategy-api = { path = "crates/strategy/api", version = "0.1.0" }
+oath-core-api = { path = "crates/core/api", version = "0.1.0" }
 
 # External shared — backend-specific deps belong in individual crate Cargo.toml files
 bytes = "1"
