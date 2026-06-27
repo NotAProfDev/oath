@@ -7,7 +7,7 @@ The `.out-of-scope/` directory in a repo stores persistent records of rejected f
 
 ## Directory structure
 
-```
+```text
 .out-of-scope/
 ├── dark-mode.md
 ├── plugin-system.md

@@ -169,7 +169,7 @@ is untouched when the flag is absent.
 **Key interfaces:**
 - The command's error path should emit `{ "error": string }` under `--json`
   instead of the plain-text error
-- Reuse the existing serializer the PR already added; don't introduce a second
+- Reuse the existing serializer the PR already added; don't introduce a second serializer
 
 **Acceptance criteria:**
 - [ ] `triage list --json` emits valid JSON for both success and error cases

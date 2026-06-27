@@ -38,4 +38,4 @@ capture ERROR_MSG "Paste the error message (or 'none'):"
 
 printf '\n--- Captured ---\n'
 printf 'ERRORED=%s\n' "$ERRORED"
-printf 'ERROR_MSG=%s\n' "$ERROR_MSG"
+printf 'ERROR_MSG<<EOF\n%s\nEOF\n' "$ERROR_MSG"

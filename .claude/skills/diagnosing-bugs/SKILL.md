@@ -7,7 +7,7 @@ description: Diagnosis loop for hard bugs and performance regressions. Use when 
 
 A discipline for hard bugs. Skip phases only when explicitly justified.
 
-When exploring the codebase, read `CONTEXT.md` (if it exists) to get a clear mental model of the relevant modules, and check ADRs in the area you're touching.
+When exploring the codebase, first resolve the active context (`CONTEXT-MAP.md` for multi-context repos, otherwise the root `CONTEXT.md`), then read that context's docs and check the ADRs in the area you're touching.
 
 ## Phase 1 — Build a feedback loop
 
