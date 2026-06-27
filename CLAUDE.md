@@ -80,6 +80,8 @@ alongside `rust-analyzer-lsp` and `claude-md-management`). Prefer its process
 skills — `brainstorming`, `writing-plans`, `test-driven-development`,
 `systematic-debugging` — for any non-trivial work.
 
-Project-specific skills live in `.claude/skills/`: `codebase-design`,
-`domain-modeling`, `grill-me`/`grilling`, `handoff`, `improve-codebase-architecture`,
-`prototype`, `to-issues`, `to-prd`, `triage`.
+Project-specific skills live in `.claude/skills/`: `ask-matt`, `codebase-design`,
+`diagnosing-bugs`, `domain-modeling`, `grill-me`, `grill-with-docs`, `grilling`,
+`handoff`, `implement`, `improve-codebase-architecture`, `prototype`,
+`resolving-merge-conflicts`, `setup-matt-pocock-skills`, `tdd`, `to-issues`,
+`to-prd`, `triage`.

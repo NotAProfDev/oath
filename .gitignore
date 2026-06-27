@@ -33,8 +33,11 @@ target/
 .idea/
 
 ### AI tooling ###
-# Claude Code local config, skills, and session data
-.claude/
+# Claude Code session data and local config are ignored, but the curated
+# skills and the shared settings.json are version-controlled (see CLAUDE.md).
+.claude/*
+!.claude/skills/
+!.claude/settings.json
 # Superpowers plugin artifacts
 .superpowers/
 
