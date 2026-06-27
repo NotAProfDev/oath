@@ -334,14 +334,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "oath-ingest-core"
-version = "0.1.0"
-dependencies = [
- "oath-model",
- "thiserror",
-]
-
-[[package]]
 name = "oath-messaging-core"
 version = "0.1.0"
 dependencies = [
