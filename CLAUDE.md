@@ -18,7 +18,9 @@ Every change follows this lifecycle — **one issue, one PR**:
 
 1. **Issue** — open a GitHub issue describing the change (use the issue templates).
 2. **Branch** — branch off `main` to implement that issue (e.g. `feat/<slug>`,
-   `fix/<slug>`). One branch implements one issue.
+   `fix/<slug>`). One branch implements one issue. **Isolate the work in a git
+   worktree under `.claude/worktrees/<slug>` — never switch the primary
+   checkout's branch, which would disrupt concurrent work open in the editor.**
 3. **Local CI** — implement, then `just ci` must pass. The pre-push hook enforces
    the full gate, so a clean push means local CI is green.
 4. **PR** — open a pull request that references the issue (`Closes #N`).
