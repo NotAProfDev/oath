@@ -23,12 +23,17 @@ per-Source topics conflated.
 _Avoid_: venue, feed, provider (for this routing-key role).
 
 **Price**:
-The value per unit of an instrument, expressed in its quote currency.
+The value per unit of an instrument, expressed in its quote currency. Can be
+**negative** (e.g. spreads, or a commodity in backwardation gone sub-zero). Its
+decimal granularity is a property of the **instrument** (its tick size), not of the
+price value itself.
 _Avoid_: cost, rate, level.
 
 **Quantity**:
-An amount of an instrument.
-_Avoid_: size, amount, volume.
+A **magnitude** — a non-negative amount of an instrument. Direction is never
+carried by a Quantity; it lives in [Side], and net signed exposure is a property of
+a Position derived from Side + Quantity.
+_Avoid_: size, amount, volume; a "signed quantity".
 
 **Side**:
 The direction of an order or trade — buy or sell.

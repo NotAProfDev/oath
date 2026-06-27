@@ -6,7 +6,9 @@
 (ADRs 0014–0019). **All architecture branches closed.** The **Bus-contract**
 parked-question cluster — **closed 2026-06-27** (ADRs 0020–0022): trait delivery
 classes × access patterns, two-level routing, and the `Reliable` order-path
-failure model.
+failure model. **Numeric types** parked question — **closed 2026-06-27**
+(ADR-0023): fixed-point always-`i128`, exact/analytical two-domain split,
+instrument-sourced precision, checked money ops.
 
 ## The question
 
@@ -156,8 +158,13 @@ cross-process complexity to buy crash containment and hot-pluggability.
 - **Snapshot** cadence and contents (recovery substrate).
 - **Symbology** design: canonical identity (perm_id/OpenFIGI) + per-adapter
   mapping.
-- `Price`/`Quantity` numeric needs per asset class (crypto/wei) — when to move
-  the inner type off `rust_decimal`.
+- ~~`Price`/`Quantity` numeric needs per asset class (crypto/wei) — when to move
+  the inner type off `rust_decimal`.~~ — **resolved (ADR-0023)**: drop
+  `rust_decimal`; fixed-point **always-`i128`** on the wire (`Price` signed,
+  `Quantity` unsigned magnitude + `Side`); **two-domain split** (exact `i128` /
+  analytical `f64`, convert at the strategy boundary); precision is **instrument
+  metadata**, raw-only wire; money ops are checked / no-bare-arithmetic / widen-to-256
+  for notional; layered float-determinism scope (refines ADR-0012).
 - **Deterministic client-order-id** generation scheme.
 - **Core failover** (Aeron-Cluster-style hot standby) — future, documented in
   ADR-0005.
