@@ -4,8 +4,9 @@
 # which runs from the workspace root.
 #
 # Tools are built from source via `cargo install --locked` (not cargo-binstall)
-# for build-from-source provenance. There is no cargo cache volume, so this runs
-# in full on each container create.
+# for build-from-source provenance. They install into the persistent
+# `/usr/local/cargo` volume (see devcontainer.json `mounts`), so on a warm
+# rebuild `cargo install` is a near no-op rather than a full from-source build.
 set -euo pipefail
 
 # --- Volume-backed build dir ownership ----------------------------------
