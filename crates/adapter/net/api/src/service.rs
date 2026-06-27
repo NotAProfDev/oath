@@ -11,7 +11,7 @@
 //! progressively further inward.
 //!
 //! ```no_run
-//! # use oath_net_core::service::{Layer, Service, ServiceBuilder};
+//! # use oath_adapter_net_api::service::{Layer, Service, ServiceBuilder};
 //! # use std::future::Future;
 //! # struct TracingLayer;
 //! # struct MetricsLayer;
@@ -73,7 +73,7 @@ pub trait Layer<S> {
 /// the outermost wrapper and therefore the first to execute on each request.
 ///
 /// ```
-/// # use oath_net_core::service::{Identity, ServiceBuilder};
+/// # use oath_adapter_net_api::service::{Identity, ServiceBuilder};
 /// let _builder = ServiceBuilder::new(); // starts with Identity (no-op)
 /// ```
 #[derive(Debug, Clone)]

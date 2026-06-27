@@ -326,6 +326,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "oath-adapter-net-api"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "futures-core",
+ "futures-sink",
+ "http",
+ "http-body",
+]
+
+[[package]]
 name = "oath-bus-api"
 version = "0.1.0"
 dependencies = [
@@ -406,17 +417,6 @@ dependencies = [
  "thiserror",
  "time",
  "uuid",
-]
-
-[[package]]
-name = "oath-net-core"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "futures-core",
- "futures-sink",
- "http",
- "http-body",
 ]
 
 [[package]]

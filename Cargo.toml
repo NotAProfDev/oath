@@ -5,7 +5,7 @@
 resolver = "3"
 members = [
   "crates/model",
-  "crates/net/core",
+  "crates/adapter/net/api",
   "crates/bus/api",
   "crates/event-log/api",
   "crates/persistence/api",
@@ -35,7 +35,7 @@ categories = ["finance", "asynchronous"]
 # Internal crates — version is required so cargo-deny can resolve the dep and
 # does not treat { workspace = true } path deps as wildcard requirements.
 oath-model = { path = "crates/model", version = "0.1.0" }
-oath-net-core = { path = "crates/net/core", version = "0.1.0" }
+oath-adapter-net-api = { path = "crates/adapter/net/api", version = "0.1.0" }
 oath-bus-api = { path = "crates/bus/api", version = "0.1.0" }
 oath-event-log-api = { path = "crates/event-log/api", version = "0.1.0" }
 oath-persistence-api = { path = "crates/persistence/api", version = "0.1.0" }

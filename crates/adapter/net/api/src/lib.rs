@@ -1,4 +1,4 @@
-//! `oath-net-core` — composition primitives and capability trait contracts.
+//! `oath-adapter-net-api` — composition primitives and capability trait contracts.
 //!
 //! This crate is **zero I/O, zero runtime**. It defines the shared
 //! abstractions that every layer in the network stack depends on:
