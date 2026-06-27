@@ -334,9 +334,28 @@ dependencies = [
 ]
 
 [[package]]
-name = "oath-execution-core"
+name = "oath-core-execution"
 version = "0.1.0"
 dependencies = [
+ "oath-core-api",
+ "oath-model",
+ "thiserror",
+]
+
+[[package]]
+name = "oath-core-portfolio"
+version = "0.1.0"
+dependencies = [
+ "oath-core-api",
+ "oath-model",
+ "thiserror",
+]
+
+[[package]]
+name = "oath-core-risk"
+version = "0.1.0"
+dependencies = [
+ "oath-core-api",
  "oath-model",
  "thiserror",
 ]
@@ -376,25 +395,6 @@ name = "oath-persistence-core"
 version = "0.1.0"
 dependencies = [
  "oath-model",
- "thiserror",
-]
-
-[[package]]
-name = "oath-portfolio-core"
-version = "0.1.0"
-dependencies = [
- "oath-execution-core",
- "oath-model",
- "thiserror",
-]
-
-[[package]]
-name = "oath-risk-core"
-version = "0.1.0"
-dependencies = [
- "oath-execution-core",
- "oath-model",
- "oath-portfolio-core",
  "thiserror",
 ]
 
