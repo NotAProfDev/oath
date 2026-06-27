@@ -1,5 +1,5 @@
 [package]
-name = "oath-strategy-core"
+name = "oath-strategy-api"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,17 +10,8 @@ workspace = true
 
 [dependencies]
 oath-model = { workspace = true }
-oath-ingest-core = { workspace = true }
-oath-execution-core = { workspace = true }
-oath-portfolio-core = { workspace = true }
 thiserror = { workspace = true }
 
 # cargo-machete: deps declared ahead of first use; prune from `ignored` as they are adopted.
 [package.metadata.cargo-machete]
-ignored = [
-  "oath-execution-core",
-  "oath-ingest-core",
-  "oath-model",
-  "oath-portfolio-core",
-  "thiserror",
-]
+ignored = ["oath-model", "thiserror"]

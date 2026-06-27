@@ -399,13 +399,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "oath-strategy-core"
+name = "oath-strategy-api"
 version = "0.1.0"
 dependencies = [
- "oath-execution-core",
- "oath-ingest-core",
  "oath-model",
- "oath-portfolio-core",
  "thiserror",
 ]
 
