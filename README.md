@@ -23,7 +23,7 @@ Every subsystem is defined behind a trait. Backends, adapters, transports, and s
 | `oath-core` | The Core process binary |
 | `oath-adapter-api` | Harness + `Broker` / `DataProvider` traits for venue adapters |
 | `oath-adapter-net-api` | HTTP/WS composition primitives (`Service`, `Layer`) for adapters |
-| `oath-strategy-api` | User-facing `Strategy` trait and Signal types |
+| `oath-strategy-api` | User-facing `Strategy` trait and Signal ergonomics (the canonical `Signal` payload lives in `oath-model`, per ADR-0028) |
 | `oath-strategy-host` | Strategy Node binary: hosts user strategies, isolated from Core |
 | `oath-cli` | The first Frontend (MVP) |
 | `oath-supervisor` | Operational-plane process: boots and watches the topology |
