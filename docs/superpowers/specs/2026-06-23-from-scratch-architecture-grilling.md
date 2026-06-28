@@ -28,7 +28,7 @@ single-process, statically-composed monolith (`oath-engine` composes all layers
 via `EngineBuilder`; dep graph `engine → {everything}`). The design we converged
 on is a **single-host, multi-process, event-sourced system communicating over a
 swappable message Bus**. The current crate graph is aimed at the monolith we
-decided *not* to build — revising it is open branch (A) below.
+decided _not_ to build — revising it is open branch (A) below.
 
 ## Decisions made (see docs/adr/)
 
@@ -50,7 +50,7 @@ decided *not* to build — revising it is open branch (A) below.
 - **[ADR-0005](../../adr/0005-single-writer-event-sourced-core.md)** —
   Single-writer, event-sourced, deterministic Core. MVP = single-threaded kernel +
   offloaded async I/O (NautilusTrader-validated); disruptor pipeline is a
-  later, *measured* optimization. Replay = fold over the Event Log.
+  later, _measured_ optimization. Replay = fold over the Event Log.
 - **[ADR-0006](../../adr/0006-broker-reconciliation-contract.md)** — Broker is
   the source of truth. Recovery = replay + reconcile, joined by a client order
   id. Log-before-send ordering invariant. Idempotent submit + queryable order
@@ -127,7 +127,7 @@ persistence/recovery, transport).
 
 NautilusTrader independently uses nearly the same model (single-threaded
 deterministic kernel, offloaded I/O, centralized cache, no sharding,
-strategy→risk→exec). Key *deliberate* divergence: Nautilus is single-process
+strategy→risk→exec). Key _deliberate_ divergence: Nautilus is single-process
 with a non-swappable bus; OATH is multi-process with a swappable bus — paying
 cross-process complexity to buy crash containment and hot-pluggability.
 
@@ -167,8 +167,8 @@ cross-process complexity to buy crash containment and hot-pluggability.
   mapping.~~ — **resolved (ADR-0025)**: **`InstrumentId`** = self-_identifying_
   canonical identity (externally-anchored ISIN/FIGI/OCC where it exists,
   venue-qualified fallback, **never guess a collapse**); **`Symbol`** demoted to venue
-  ticker. Off-wire **`Instrument`** record keyed `(InstrumentId, Source)` (shared core
-  + per-asset-class typed tail) is the single home for ADR-0023 precision. Wire form =
+  ticker. Off-wire **`Instrument`** record keyed `(InstrumentId, Source)` (shared core +
+  per-asset-class typed tail) is the single home for ADR-0023 precision. Wire form =
   fixed-size self-identifying name (Choice A; local-only interning). Mapping =
   deterministic versioned rule + curated overrides + cross-`Source` price-plausibility
   monitor. Resolution + lifecycle (immutable id + logged succession; corporate actions
@@ -188,7 +188,19 @@ cross-process complexity to buy crash containment and hot-pluggability.
   analytical `f64`, convert at the strategy boundary); precision is **instrument
   metadata**, raw-only wire; money ops are checked / no-bare-arithmetic / widen-to-256
   for notional; layered float-determinism scope (refines ADR-0012).
-- **Deterministic client-order-id** generation scheme.
+- ~~**Deterministic client-order-id** generation scheme.~~ — **resolved
+  (ADR-0026)**: three ids by role — **Order Id** (internal, lifecycle-stable),
+  **Order Instruction Id** (per place/amend/cancel; the dedup + reconciliation join
+  key), **Broker Order Id** (venue-assigned, learned). Internal ids are
+  derived-deterministic `(EnvironmentId, generation, counter)`; `generation` is
+  bumped once per boot and logged as an `IncarnationStarted` marker (reproduced by
+  folding, never recomputed). Env-wide order-counter; `Account`/`Source` not in the
+  id. Two many-to-one indexes (instruction→order, broker→order). Chaining is
+  Core-owned (`supersedes` in the canonical `OrderInstruction`); the adapter renders
+  to the venue (FIX `ClOrdID`/`OrigClOrdID`/`OrderID`). Refines ADR-0006.
+  - **New parked sub-question:** the **amend-before-ack** edge (amending an [Order]
+    whose place is not yet acknowledged, so no `Broker Order Id` exists) — order
+    state-machine territory, separate from identity.
 - **Core failover** (Aeron-Cluster-style hot standby) — future, documented in
   ADR-0005.
 - **Strategy sandbox** (Branch B): MVP relies on process isolation (Strategy Node)
