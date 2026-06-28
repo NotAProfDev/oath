@@ -101,9 +101,12 @@ where S: Service<http::Request<Bytes>, Response = http::Response<B>, Error = Htt
       B: http_body::Body<Data = Bytes, Error = HttpError> { type Body = B; }
 ```
 
-Backends implement `Service` *once* and are `HttpClient` for free; both the raw leaf
-(`Body = Incoming`) and the fully-layered stack (`Body = ResponseBody<Incoming>`)
-satisfy it. `send` is sugar over `call`. Per ADR-0029 §5 it is a **compile-time
+Backends implement `Service` *once* and are `HttpClient` for free **once the backend
+body's error is normalized to `HttpError`** — the leaf wraps `Incoming` (whose native
+error is `hyper::Error`) so that `Body::Error = HttpError`, the same anti-corruption
+mapping §5 requires for `Service::Error`. Both the normalized leaf (`Body = HyperBody`,
+a `MapErr` over `Incoming`) and the fully-layered stack (`Body = ResponseBody<HyperBody>`)
+then satisfy it. `send` is sugar over `call`. Per ADR-0029 §5 it is a **compile-time
 `impl HttpClient` seam**, not `dyn`.
 
 ### 7. Backend: `hyper` + `hyper-util` + `rustls`
@@ -113,8 +116,9 @@ over rustls, **not reqwest**:
 
 - It fits the leaf natively — `hyper_util::client::legacy::Client` takes
   `http::Request<B>` and returns `http::Response<Incoming>` where `Incoming` is *already*
-  `http_body::Body<Data = Bytes>`; the leaf is nearly an identity wrap plus
-  `hyper::Error → HttpError`. reqwest hands back a `Stream` needing re-wrapping.
+  `http_body::Body<Data = Bytes>`; the leaf is nearly an identity wrap plus the
+  `hyper::Error → HttpError` mapping on **both** the response result and the body
+  (`MapErr<Incoming>` — see §6). reqwest hands back a `Stream` needing re-wrapping.
 - We build our own middleware (auth, retry, rate-limit), so reqwest's batteries
   (redirect/cookie/decompression policy) partly **duplicate** the stack and add implicit
   behaviour the anti-corruption ethos wants explicit.
@@ -133,13 +137,14 @@ constructor:
 pub struct HttpConfig {                       // plain data — no serde here
     pub timeout: TimeoutConfig, pub retry: RetryConfig, pub headers: HeaderMap, /* … */
 }
-pub fn build(cfg: HttpConfig, timer: TokioTimer, auth: impl AuthSource, …) -> impl HttpClient;
+pub fn build<T: Timer>(cfg: HttpConfig, timer: T, auth: impl AuthSource, …) -> impl HttpClient;
 ```
 
-- **Data vs dependencies:** `HttpConfig` is pure data; the `Timer`, the `AuthSource`,
-  and the keyed rate-limiter (ADR-0031) are passed as separate constructor args —
-  behaviour and credentials are not config. `serde` stays in the adapter, which maps its
-  own deserialised settings into these structs.
+- **Data vs dependencies:** `HttpConfig` is pure data; the `Timer` (generic `T: Timer`,
+  so a mock clock drives the timing layers in tests while production passes `TokioTimer`),
+  the `AuthSource`, and the keyed rate-limiter (ADR-0031) are passed as separate
+  constructor args — behaviour and credentials are not config. `serde` stays in the
+  adapter, which maps its own deserialised settings into these structs.
 - **Three tiers:** *use* the default (`build`); *add* layers by wrapping the returned
   `impl HttpClient` (e.g. IBKR's effectful session-keepalive `tickle`, which is **not** a
   net-http layer); or *replace/reorder* by assembling `ServiceBuilder` from the public

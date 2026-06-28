@@ -86,10 +86,14 @@ enum Permit { Rate, Concurrency(OwnedSemaphorePermit) }   // acquire → guard
   enum Scope { None, Global, Local, Both }   // full 2×2 state space
   ```
 
-  `None` → unlimited (acquire nothing); `Global`/`Local`/`Both` → the obvious bucket sets;
-  **absent directive defaults to `Global`** (you cannot bypass the global budget by
-  forgetting to stamp). Resolution **skips any referenced bucket missing from the map**,
-  so the model never panics on a gap.
+  `None` → unlimited (acquire nothing — the *explicit* opt-out); `Global`/`Local`/`Both`
+  → the obvious bucket sets; **absent directive defaults to `Global`** (you cannot bypass
+  the global budget by forgetting to stamp). A `Global`/`Local`/`Both` request that
+  references a bucket **missing from the map is a configuration error, not "no limit"**:
+  the config is **validated at construction** (every key the adapter stamps must have a
+  bucket), and any gap that still reaches runtime **fails closed** — the request is
+  rejected as `Throttled`, never sent unthrottled. A silent fail-open path would bypass
+  pacing straight into IBKR's 429 penalty box; only the explicit `None` is unlimited.
 - **Acquire order:** rate-type buckets **before** concurrency-type, global-first — a
   request never holds a scarce concurrency permit while merely *waiting* on a rate token.
 - **Permit lifetime:** a rate `Permit` is a ZST (acquire-and-go); a concurrency permit is
