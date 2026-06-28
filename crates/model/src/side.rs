@@ -39,12 +39,12 @@ mod tests {
     #[test]
     fn serializes_to_expected_shape() {
         assert_eq!(
-            serde_json::to_string(&Side::Buy).ok(),
-            Some("\"Buy\"".to_owned())
+            serde_json::to_string(&Side::Buy).as_deref().ok(),
+            Some("\"Buy\"")
         );
         assert_eq!(
-            serde_json::to_string(&Side::Sell).ok(),
-            Some("\"Sell\"".to_owned())
+            serde_json::to_string(&Side::Sell).as_deref().ok(),
+            Some("\"Sell\"")
         );
     }
 
