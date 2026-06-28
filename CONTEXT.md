@@ -186,6 +186,14 @@ co-bound into one Environment **share its fate** — a Core fault or [Emergency 
 touches all of them.
 _Avoid_: instance, deployment, tenant, session.
 
+**EnvironmentId**:
+The stable, operator-assigned identity of an [Environment] — the same handle that
+names its Bus namespace — recorded at genesis so it is replay-stable, and
+administered unique across any Environments that could target the same [Broker]
+[Account]. It prefixes order identities so two Cores can never collide at a shared
+venue.
+_Avoid_: name, tag, instance id.
+
 **Simulated Broker**:
 A Broker-adapter backend that fills Orders internally against the Environment's
 own market-data feed instead of routing to a real venue. The execution backend
@@ -226,9 +234,43 @@ decides; the Kernel performs the actions. Internal to Core, never sent on the Bu
 _Avoid_: verdict, judgment, command, ruling.
 
 **Order**:
-An instruction Core sends to a broker to buy or sell, after the Risk Engine
-approves. Carries the freshness/validity context it was decided under.
+The logical buy/sell order Core works at a [Broker], identified by its [Order Id]
+and stable across a lifecycle of [Order Instruction]s (place/amend/cancel) until it
+reaches a terminal state (filled/cancelled/rejected). Core sends it only after the
+Risk Engine approves; it carries the freshness/validity context it was decided
+under.
 _Avoid_: trade, transaction.
+
+**Order Instruction**:
+A single command Core issues against an [Order] — _place_ (open), _amend_ (modify
+price/quantity), or _cancel_. Each is identified by its own [Order Instruction Id]
+and supersedes the previous instruction on the same Order. The unit the Bus carries
+from Core to a [Broker] adapter.
+_Avoid_: order modification, request, message (for this command).
+
+**Order Id**:
+Core's stable, internal identity for an [Order] — constant across its whole
+lifecycle of [Order Instruction]s. Derived deterministically so [Replay] regenerates
+it identically; never sent on the wire. The anchor every per-instruction and
+broker-assigned id resolves back to.
+_Avoid_: client order id (that is per-instruction), broker order id (that is the
+venue's).
+
+**Order Instruction Id**:
+The identity of one [Order Instruction] — unique per instruction, reused only on
+retransmission of the same instruction. Derived deterministically (so [Replay]
+regenerates it) and the join key for idempotent submission and crash
+reconciliation: the broker's dedup key and the "what happened to this?" question.
+The adapter renders it to the venue's per-message id (e.g. FIX `ClOrdID`).
+_Avoid_: client order id (ambiguous — it is per-instruction, not per-order),
+message id, event id (reserved for [Domain Event]).
+
+**Broker Order Id**:
+The venue-assigned identity for an [Order], learned from the broker's
+acknowledgements — a logged Core input, so replay-stable _as data_, not derived. One
+[Order] may accumulate several across its life, since some venues re-issue it on
+each amend. Used for venue-keyed queries and cross-checking the broker's books.
+_Avoid_: order id (that is Core's internal id), exchange ref, venue id.
 
 **Fill**:
 A partial or complete execution of an order, reported by a broker.
