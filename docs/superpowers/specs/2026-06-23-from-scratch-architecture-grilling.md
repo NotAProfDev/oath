@@ -147,7 +147,27 @@ cross-process complexity to buy crash containment and hot-pluggability.
 
 ## Parked sub-questions (don't lose these)
 
-- Schema **evolution/versioning** of `#[repr(C)]` POD messages (ADR-0002).
+- ~~**`oath-model` type placement** (`Signal` / `Instrument` / `Position`).~~ —
+  **resolved (ADR-0028)**: shared contracts (cross a process boundary, or read by ≥2
+  subsystems) sink to `oath-model`; `*/api` crates hold traits + single-process
+  privates. `Signal`/`Instrument`/`Position`/`Account`/`Source` → model; `Decision` →
+  `core-api`; lot-level accounting → `core-portfolio`. README "strategy-api: Signal
+  types" corrected (payload is model; strategy-api keeps the trait + ergonomics).
+  **This closes `oath-model`'s design for the Equity MVP** (B1–B4 of the 2026-06-28
+  session: `u64` time, zero-copy/versioning frame, `InstrumentId` length, placement).
+
+- ~~Schema **evolution/versioning** of `#[repr(C)]` POD messages (ADR-0002).~~ —
+  **resolved (ADR-0027)**: **deferred pre-1.0** (no machinery; churn expected) but the
+  seam is **reserved** — `IncarnationStarted` gains `schema_version: u16` (=1),
+  versioning is an **Event-Log** concern (the supervised single-build-per-Environment
+  live Bus has no in-flight skew, so it stays unversioned), and the future rule is
+  **model-wide bumps + retained-decoder upcasting**, never reinterpreting old bytes.
+  Same ADR fixes the **wire-representation frame**: `Serialize` is the universal
+  bound, the zero-copy/POD bound is **backend-specific** (shared-memory family:
+  iceoryx2 / Aeron-IPC / mmap log-replay) via **`zerocopy`** (chosen over `bytemuck`
+  for compile-time padding rejection + `i128`-alignment; `core::mem::TransmuteFrom`
+  noted as the future stable replacement); and `Timestamp` = **`u64` UnixNanos** UTC
+  (refines ADR-0023's integer-time; `time` demoted to the adapter/display boundary).
 - ~~Bus trait's **loan-vs-own** contract~~ — **resolved (ADR-0020)**: public RAII
   loan guard (degrading to owned), with mandated copy-out to owned `M: Copy` POD at
   the retention / thread-hand-off / `.await` boundaries.
@@ -175,7 +195,11 @@ cross-process complexity to buy crash containment and hot-pluggability.
   as Core inputs; time-versioned metadata) are **logged Core inputs**. _Also drove
   **ADR-0024** (multi-broker same-safety-class Environments; shadow = targeting) and
   added glossary `Account` / `Position`._
-  - **New parked sub-questions:** fixed-size id **length** vs real IBKR contracts;
+  - **New parked sub-questions:** ~~fixed-size id **length** vs real IBKR contracts~~
+    — **resolved (ADR-0027)**: `InstrumentId = [u8; 32]` flat NUL-padded ASCII name;
+    binding constraint is the OCC 21-char option symbol (25 prefixed), FIGI/ISIN/PermID
+    all fit; 24 too small, 48 rejected; outliers (DEX addresses) use the reserved
+    `u64` surrogate. Anchor priority ISIN/FIGI/OCC-first, PermID vendor fallback.
     **combo identity** (structural-encode vs leg-decompose); **central security-master**
     service (production-grade evolution of the resolution/curation seam — additive,
     does not change identity); **OpenFIGI** anchor-lookup fallback; the
