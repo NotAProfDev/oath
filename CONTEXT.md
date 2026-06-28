@@ -32,25 +32,33 @@ different venues — which is exactly why it cannot be the identity.
 _Avoid_: identifier, id, key (for this label sense).
 
 **Source**:
-The Broker or Data-Provider Adapter that produced a given data stream — part of a
-market-data topic's routing key, never part of instrument identity. The same
-[InstrumentId] carried by two Sources is two distinct streams (different prices,
-timestamps, and gaps); a consolidated/NBBO view is a _derived_ stream, never raw
-per-Source topics conflated.
-_Avoid_: venue, feed, provider (for this routing-key role).
+The **operator-assigned, connection-independent** identity of a logical [Broker] or
+[Data Provider] feed — the producer of a given data stream. **One logical
+venue/provider is one Source**, regardless of how many physical connections the
+[Adapter] holds: redundancy and failover are internal to the adapter and are never
+surfaced as extra Sources. It is part of a market-data topic's routing key, **never**
+part of instrument identity — the same [InstrumentId] carried by two Sources is two
+distinct streams (different prices, timestamps, and gaps); a consolidated/NBBO view is
+a _derived_ stream, never raw per-Source topics conflated. Its stability is
+**required** because [Account] identity composes it: a per-connection Source would
+split one broker account into two identities and double-count [Position]s.
+_Avoid_: venue, feed, provider, connection, session (for this routing-key role).
 
 **Instrument**:
 The resolved _reference-data_ record for an [InstrumentId] — its [Symbol] (the
 venue ticker), tick size, lot/min size, multiplier (contract size), quote currency,
 asset class, and later expiry/strike/right/underlying. It is **not** identity (that
-is [InstrumentId]) and never travels on the wire or the Event Log: ADR-0023 keeps
-[Price]/[Quantity] precision-free raw `i128`/`u128`, and the `Instrument` is the
-single home for the precision used to interpret them. The adapter **resolves it once
-at the boundary** from a [Source]'s symbology / contract details, caches it, and any
-consumer needing precision (order emission, display) looks it up. Resolution is keyed
-by `InstrumentId` **per [Source]** — contract facts like tick can differ across
-venues, so the same `InstrumentId` from two Sources may resolve to two `Instrument`s,
-exactly as it is two market-data streams.
+is [InstrumentId]); it is the single home for the precision that interprets the
+precision-free raw `i128`/`u128` [Price]/[Quantity] (ADR-0023). The adapter
+**resolves it at the boundary** from a [Source]'s symbology / contract details and
+**distributes it** to the consumers that need precision (Core money-math, strategies,
+display). The attributes the canonical fold depends on (e.g. **multiplier**) travel as
+**logged Core inputs**, so [Replay] reproduces P&L exactly; display-only attributes
+(the [Symbol] ticker) refresh **without logging**. Like [Order Id], it is
+OATH-internal in that **no venue ever receives it** — not in the sense that it stays
+unshared. Resolution is keyed by `InstrumentId` **per [Source]** — contract facts like
+tick can differ across venues, so the same `InstrumentId` from two Sources may resolve
+to two `Instrument`s, exactly as it is two market-data streams.
 _Avoid_: contract, security, product (for this record); do not conflate with
 [InstrumentId] (identity) or [Symbol] (ticker).
 
@@ -249,12 +257,16 @@ from Core to a [Broker] adapter.
 _Avoid_: order modification, request, message (for this command).
 
 **Order Id**:
-Core's stable, internal identity for an [Order] — constant across its whole
-lifecycle of [Order Instruction]s. Derived deterministically so [Replay] regenerates
-it identically; never sent on the wire. The anchor every per-instruction and
-broker-assigned id resolves back to.
-_Avoid_: client order id (that is per-instruction), broker order id (that is the
-venue's).
+Core's stable identity for an [Order] — constant across its whole lifecycle of
+[Order Instruction]s, and the internal anchor every per-instruction and
+broker-assigned id resolves back to. Derived deterministically so [Replay] regenerates
+it identically. **Never rendered to a venue id** — the [Broker] never sees it; the
+venue identifies an order by its per-instruction ids and its own [Broker Order Id]. It
+**does** travel OATH's own [Bus], though: it anchors the [Domain Event] audit
+narrative and the order views a [Frontend] tracks, and rides the order command Core
+sends the adapter. "Internal" means _no venue sees it_ — not that it stays inside Core.
+_Avoid_: client order id (that is per-instruction); broker order id (that is the
+venue's); "never on the wire" (it is never on the _venue_ wire, but is on OATH's Bus).
 
 **Order Instruction Id**:
 The identity of one [Order Instruction] — unique per instruction, reused only on
