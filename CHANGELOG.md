@@ -19,6 +19,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `oath-model` numeric primitives — the root contract's first real content: `Price`
+  (signed fixed-point `i128`), `Quantity` (unsigned `u128` magnitude), `Side`
+  (`Buy`/`Sell`), and `ArithmeticError`, with checked `const fn` add/sub that error
+  rather than wrap (ADR-0023/0027). Dropped `rust_decimal`, `uuid`, and `time` from
+  `oath-model`; added `proptest` and `serde_json` as dev-dependencies.
 - Cargo workspace scaffold (initial 10 domain crates; later restructured — see Changed).
 - Workspace-level lint configuration: `rustc`, `clippy` (all, pedantic, nursery, cargo,
   and selected restriction-group lints), with test-code exemptions via `.clippy.toml`.
