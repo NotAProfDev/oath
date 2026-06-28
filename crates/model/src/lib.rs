@@ -4,9 +4,11 @@
 #![forbid(unsafe_code)]
 
 mod error;
+mod price;
 mod quantity;
 mod side;
 
 pub use error::ArithmeticError;
+pub use price::Price;
 pub use quantity::Quantity;
 pub use side::Side;
