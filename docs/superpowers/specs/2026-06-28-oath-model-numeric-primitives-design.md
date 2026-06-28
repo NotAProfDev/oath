@@ -27,8 +27,7 @@ backing.
   universal type bound is `Serialize`, POD is a backend-specific discipline.
 - **ADR-0027** — wire representation: layered bounds, the `zerocopy` layout crate,
   `u64`-nanos `Timestamp`, deferred schema versioning. Governs the *deferred* work
-  below; reconciles the `oath-model` manifest. *(Currently an uncommitted draft —
-  this spec aligns to it; it lands on its own.)*
+  below; reconciles the `oath-model` manifest. *(Landed on `main` in #49.)*
 - **CONTEXT.md** — the ubiquitous-language glossary (`Price`, `Quantity`, `Side`,
   `Position`, `Source`, `InstrumentId`).
 

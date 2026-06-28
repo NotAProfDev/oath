@@ -16,6 +16,8 @@ use crate::error::ArithmeticError;
 /// use oath_model::Quantity;
 /// let q = Quantity::from_raw(100);
 /// assert_eq!(q.raw(), 100);
+/// assert_eq!(Quantity::from_raw(5).checked_sub(Quantity::from_raw(3)), Ok(Quantity::from_raw(2)));
+/// assert!(Quantity::from_raw(3).checked_sub(Quantity::from_raw(5)).is_err());
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct Quantity(u128);
@@ -33,7 +35,8 @@ impl Quantity {
         self.0
     }
 
-    /// Adds two quantities, returning an error on overflow instead of wrapping.
+    /// Adds two quantities, returning an error on overflow rather than wrapping
+    /// or panicking.
     ///
     /// # Errors
     ///
@@ -45,7 +48,8 @@ impl Quantity {
         }
     }
 
-    /// Subtracts one quantity from another.
+    /// Subtracts one quantity from another, returning an error on underflow rather
+    /// than wrapping or panicking.
     ///
     /// # Errors
     ///

@@ -37,7 +37,8 @@ impl Price {
         self.0
     }
 
-    /// Adds two prices, returning an error on overflow instead of wrapping.
+    /// Adds two prices, returning an error on overflow or underflow rather than
+    /// wrapping or panicking.
     ///
     /// # Errors
     ///
@@ -51,7 +52,8 @@ impl Price {
         }
     }
 
-    /// Subtracts one price from another, returning an error on overflow.
+    /// Subtracts one price from another, returning an error on overflow or
+    /// underflow rather than wrapping or panicking.
     ///
     /// # Errors
     ///
