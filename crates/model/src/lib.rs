@@ -4,5 +4,7 @@
 #![forbid(unsafe_code)]
 
 mod error;
+mod side;
 
 pub use error::ArithmeticError;
+pub use side::Side;
