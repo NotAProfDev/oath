@@ -79,20 +79,22 @@ ignored = ["serde", "thiserror"]
 
 (This removes `rust_decimal`, `uuid`, `time` and their explanatory comment block, and drops them from the `ignored` list.)
 
-- [ ] **Step 2: Verify it builds and machete is clean**
+- [ ] **Step 2: Regenerate the lockfile (dependencies were removed)**
 
-Run: `cargo check -p oath-model --locked && cargo machete`
-Expected: `cargo check` finishes; `cargo machete` reports no unused dependencies (`serde`/`thiserror` are still ignore-listed).
+Removing dependencies makes `Cargo.lock` stale, and the pre-commit hook runs `cargo check --locked`, which **fails** on a stale lock. Regenerate it:
 
-- [ ] **Step 3: Verify formatting**
+Run: `cargo check -p oath-model`
+Expected: compiles; `git status --porcelain` now shows **both** `crates/model/Cargo.toml` and `Cargo.lock` modified (the orphaned `rust_decimal`/`uuid`/`time` entries and their unique transitive deps are dropped from the lock).
 
-Run: `taplo fmt --check`
-Expected: no diff.
+- [ ] **Step 3: Verify machete, locked build, and formatting**
 
-- [ ] **Step 4: Commit**
+Run: `cargo machete && cargo check -p oath-model --locked && taplo fmt --check`
+Expected: `cargo machete` reports no unused dependencies (`serde`/`thiserror` are ignore-listed); `cargo check --locked` now **passes** (the lock is back in sync); no taplo diff.
+
+- [ ] **Step 4: Commit (include `Cargo.lock`)**
 
 ```bash
-git add crates/model/Cargo.toml
+git add crates/model/Cargo.toml Cargo.lock
 git commit -m "chore(model): drop rust_decimal, uuid, time deps (ADR-0023/0027)"
 ```
 
@@ -329,15 +331,15 @@ impl Side {
 Run: `cargo test -p oath-model side::`
 Expected: `test result: ok. 3 passed`.
 
-- [ ] **Step 6: Verify lint + format**
+- [ ] **Step 6: Verify lint, format, and locked build**
 
-Run: `just lint && cargo fmt --all -- --check && taplo fmt --check`
-Expected: no warnings, no diffs.
+Run: `just lint && cargo fmt --all -- --check && taplo fmt --check && cargo check -p oath-model --locked`
+Expected: no warnings, no diffs. The `cargo test` run in Step 5 already pulled `proptest`/`serde_json` into `Cargo.lock`, so `cargo check --locked` passes (lock in sync). `git status --porcelain` shows `Cargo.lock` modified — it **must** be committed.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 7: Commit (include `Cargo.lock`)**
 
 ```bash
-git add Cargo.toml crates/model/Cargo.toml crates/model/src/side.rs crates/model/src/lib.rs
+git add Cargo.toml Cargo.lock crates/model/Cargo.toml crates/model/src/side.rs crates/model/src/lib.rs
 git commit -m "feat(model): add Side direction enum"
 ```
 
