@@ -61,6 +61,8 @@ serde = { version = "1", features = ["derive"] }
 thiserror = "2"
 tokio = { version = "1", features = ["full"] }
 tracing = "0.1"
+proptest = "1"
+serde_json = "1"
 
 # --- Lints ---
 # Centralized lint configuration inherited by all workspace crates via `[lints] workspace = true`.
