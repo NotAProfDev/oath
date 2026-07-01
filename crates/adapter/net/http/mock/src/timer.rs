@@ -76,11 +76,22 @@ impl Future for Sleep {
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
         let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
         if state.now >= self.deadline {
-            Poll::Ready(())
-        } else {
-            state.waiters.push((self.deadline, cx.waker().clone()));
-            Poll::Pending
+            return Poll::Ready(());
         }
+        // Re-polls while pending (e.g. this `Sleep` in a `select!` woken by a
+        // sibling future) must not stack duplicate waiters. Waiters carry no
+        // per-future identity, so dedup on `(deadline, will_wake)`: skip when
+        // this exact waker is already queued for this deadline — a re-poll of
+        // the same future is a no-op, while an unrelated future that merely
+        // shares the deadline still registers its own distinct waker.
+        let already_registered = state
+            .waiters
+            .iter()
+            .any(|(deadline, waker)| *deadline == self.deadline && waker.will_wake(cx.waker()));
+        if !already_registered {
+            state.waiters.push((self.deadline, cx.waker().clone()));
+        }
+        Poll::Pending
     }
 }
 
@@ -108,7 +119,45 @@ impl Timer for MockTimer {
 mod tests {
     use super::MockTimer;
     use oath_adapter_net_api::Timer;
+    use std::future::Future;
+    use std::pin::pin;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::task::{Context, Poll, Wake, Waker};
     use std::time::Duration;
+
+    // A waker with stable Arc identity (so `will_wake` treats a clone as equal)
+    // that records how often it is woken.
+    struct CountingWaker(AtomicUsize);
+    impl Wake for CountingWaker {
+        fn wake(self: Arc<Self>) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    #[test]
+    fn repeated_poll_does_not_stack_waiters() {
+        let timer = MockTimer::new();
+        let counter = Arc::new(CountingWaker(AtomicUsize::new(0)));
+        let waker = Waker::from(Arc::clone(&counter));
+        let mut cx = Context::from_waker(&waker);
+
+        let mut sleep = pin!(timer.sleep(Duration::from_secs(1)));
+        assert_eq!(sleep.as_mut().poll(&mut cx), Poll::Pending);
+        // A second poll with the same waker + deadline must not re-register.
+        assert_eq!(sleep.as_mut().poll(&mut cx), Poll::Pending);
+
+        let waiters = timer.state.lock().unwrap().waiters.len();
+        assert_eq!(waiters, 1, "duplicate waiter registered on re-poll");
+
+        // Advancing past the deadline wakes the single registration exactly once.
+        timer.advance(Duration::from_secs(1));
+        assert_eq!(
+            counter.0.load(Ordering::SeqCst),
+            1,
+            "sleeper woken more than once"
+        );
+    }
 
     #[tokio::test]
     async fn advance_moves_now_and_wakes_sleepers() {
