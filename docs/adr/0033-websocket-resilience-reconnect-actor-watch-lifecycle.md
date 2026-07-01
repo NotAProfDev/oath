@@ -69,16 +69,11 @@ struct ReconnectingConnection {                      // usage — new here; what
     control: WsControl,     // force_reconnect(), shutdown()
 }
 
-trait ReconnectingConnector {                        // usage seam — the assembled-stack analogue of WsConnector
-    fn connect(&self, h: http::Request<()>)          // (note: -or the factory trait, -ion the product struct)
+trait ReconnectingConnector {                        // usage seam — the factory `stack()`/`build()` return (§9);
+    fn connect(&self, h: http::Request<()>)          //   the assembled-stack analogue of the leaf `WsConnector`
         -> impl Future<Output = Result<ReconnectingConnection, WsError>> + Send;
-}
+}                                                    // (-or = the factory trait, -ion = its product struct)
 ```
-
-`ReconnectingConnector` is to `ReconnectingConnection` what `WsConnector` is to the ADR-0032 §2
-triple: the factory trait `stack()`/`build()` return (§9), whose `connect` hands the adapter the
-richer product exactly once. It is the *usage-seam* peer of the internal *composition-seam*
-`WsConnector`.
 
 The reconnect layer is the exact **`Layer → Service` analogue** from tower: you compose
 `Layer`s but *hold* a `Service` (`ServiceBuilder` yields a `Buffer<Retry<…>>` used as a
@@ -164,9 +159,9 @@ snapshot**, *not* a transition stream and *not* a naive watch of bare `ConnState
 ```rust
 struct LifecycleSnapshot {
     phase: ConnState,     // level: Connected/Stale/Reconnecting/Resumed/Unrecoverable
-    epoch: u64,           // monotonic: bumped on every completed down-cycle. Canonical: the epoch
-                          //   echoed inside Connected{epoch}/Resumed{epoch} is this same value
-                          //   (both set from one counter) — consumers diff THIS field.
+    epoch: u64,           // monotonic: bumped on every completed down-cycle. Canonical source of
+                          //   truth — the value echoed in Connected{epoch}/Resumed{epoch} is this
+                          //   field; consumers diff it.
     down_since: Option<Instant>,
     attempts: u64,        // monotonic
     total_lagged: u64,    // monotonic cumulative — NOT a per-event delta (see §6)
@@ -222,7 +217,7 @@ emit `Lagged`; control bypasses; per-stream policy adapter-side). The mechanism:
   the whole byte budget is still **admitted** (older evicted, lag incremented) — so the effective
   peak is `budget + one max frame`, a soft ceiling, not a strict one. This is the standard
   slow-consumer shape (Redis `client-output-buffer-limit`, Kafka `buffer.memory`, Netty
-  `WriteBufferWaterMark`), all of which bound backlog rather than guaranteeing a hard ceiling.
+  `WriteBufferWaterMark`).
 - **`Lagged` is a blunt, grammar-blind instrument — recorded as a consequence, not a gap.** A
   single global `total_lagged` cannot attribute drops to a stream (per-stream rings would need
   demux = venue grammar in the transport, the forbidden leak; and the dropped frames are gone).
@@ -253,11 +248,10 @@ for transient loss — but only for transient loss:
 
 Classification is by `ErrorKind` (grammar-free; `WsError: HasErrorKind`, ADR-0032 Consequences),
 adapter-refinable via a hook (venue grammar: which close-code is permanent, à la gRPC
-`UNAUTHENTICATED` vs. `UNAVAILABLE`). An optional `max_attempts` cap stays **orthogonal** —
+`UNAUTHENTICATED` vs. `UNAVAILABLE`). An optional `max_attempts` cap stays **orthogonal** — a
 voluntary give-up on a *non-critical* stream, a different axis from involuntary permanent failure.
-This ADR does not add it to the core `ConnState` (ADR-0032 §4): if a deployment enables it, the
-cap surfaces as its own terminal outcome, deliberately distinct from `Unrecoverable` (which is
-*involuntary* — a classified permanent failure, not a give-up).
+This ADR does not add it to the core `ConnState` (ADR-0032 §4): if enabled, it surfaces as its own
+terminal outcome, distinct from `Unrecoverable`.
 
 ### 8. Send-axis `RateLimit`, the control handle, and expiry ≠ death
 

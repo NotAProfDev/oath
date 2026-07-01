@@ -109,9 +109,8 @@ enum ConnState {
     Unrecoverable,                // a classified non-transient failure — will not self-heal (ADR-0033 §7)
 }
 // Buffer overflow (§6) is NOT a connection phase — it is orthogonal to `ConnState`
-// (a connection can be `Connected` *and* lagging). The `Lagged` signal is carried as
-// the monotonic cumulative `total_lagged` field on the ADR-0033 §5 `LifecycleSnapshot`,
-// not as a variant here — see the delivery-form note below and §6.
+// (a connection can be `Connected` *and* lagging), so the `Lagged` signal rides the
+// cumulative `total_lagged` field of ADR-0033 §5's `LifecycleSnapshot`, not a variant here.
 ```
 
 ADR-0033 resolves the delivery form (a `watch` of an epoch-stamped `LifecycleSnapshot`, not a
@@ -128,8 +127,9 @@ resilience layer when it classifies a permanent failure rather than retrying it 
   loop) and [ADR-0022](0022-reliable-order-path-graduated-failure.md) (graduated failure) — not
   just `Resumed`.
 - **It is the shared signal plane for the ADR-0033 layers** — the reconnect layer emits
-  `Resumed`, the heartbeat layer emits `Stale`, the buffer layer emits `Lagged` (§6). This is
-  the WS analogue of what `ErrorKind`/Telemetry is to the HTTP stack.
+  `Resumed`, the heartbeat layer emits `Stale`, the buffer layer advances `total_lagged`
+  (the `Lagged` signal, §6). This is the WS analogue of what `ErrorKind`/Telemetry is to the
+  HTTP stack.
 - **Epoch-stamped.** `Resumed{epoch}` bounds the adapter's reconcile window ("reconcile since
   epoch N") and disambiguates an in-flight `umd-` queued against the dead connection vs. the
   new one. Ordering is free: a fresh session is silent until resubscribe, so `Resumed` strictly
