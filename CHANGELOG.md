@@ -28,6 +28,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `HttpClient` (blanket-impl'd `Service` sub-trait), `ResponseBody` (buffer-xor-
   stream, forwarding `Body` metadata), and `BufferMode`. New `oath-adapter-net-
   http-mock` test harness (`MockClient`, `MockBody`, `MockTimer`).
+- WebSocket transport design: ADR-0032 (contract — untyped duplex frame channel,
+  asymmetric `Stream`/RPITIT split, epoch-stamped lifecycle, `WsConnector` leaf,
+  per-transport `AuthSource`) and ADR-0033 (resilience — reconnect actor over a
+  runtime-neutral `Spawn` seam, two-axis layer stack, `watch`-of-`LifecycleSnapshot`,
+  dual-bound drop-oldest buffer, send-side rate limit, and a circuit breaker that
+  retries transient loss forever but surfaces permanent failure as `Unrecoverable`).
+  Validated against IBKR, Binance, and Coinbase WebSocket semantics.
 - `oath-model` numeric primitives — the root contract's first real content: `Price`
   (signed fixed-point `i128`), `Quantity` (unsigned `u128` magnitude), `Side`
   (`Buy`/`Sell`), and `ArithmeticError`, with checked `const fn` add/sub that error
