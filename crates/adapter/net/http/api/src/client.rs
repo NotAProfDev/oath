@@ -46,12 +46,18 @@ mod tests {
     impl Body for EmptyBody {
         type Data = Bytes;
         type Error = HttpError;
-        fn poll_frame(self: Pin<&mut Self>, _: &mut Context<'_>)
-            -> Poll<Option<Result<Frame<Bytes>, HttpError>>> {
+        fn poll_frame(
+            self: Pin<&mut Self>,
+            _: &mut Context<'_>,
+        ) -> Poll<Option<Result<Frame<Bytes>, HttpError>>> {
             Poll::Ready(None)
         }
-        fn is_end_stream(&self) -> bool { true }
-        fn size_hint(&self) -> SizeHint { SizeHint::with_exact(0) }
+        fn is_end_stream(&self) -> bool {
+            true
+        }
+        fn size_hint(&self) -> SizeHint {
+            SizeHint::with_exact(0)
+        }
     }
 
     #[derive(Clone)]
@@ -60,8 +66,10 @@ mod tests {
         type Response = http::Response<EmptyBody>;
         type Error = HttpError;
         #[allow(clippy::manual_async_fn)]
-        fn call(&self, _req: http::Request<Bytes>)
-            -> impl std::future::Future<Output = Result<Self::Response, HttpError>> + Send {
+        fn call(
+            &self,
+            _req: http::Request<Bytes>,
+        ) -> impl std::future::Future<Output = Result<Self::Response, HttpError>> + Send {
             async { Ok(http::Response::new(EmptyBody)) }
         }
     }
@@ -74,7 +82,9 @@ mod tests {
 
     #[tokio::test]
     async fn send_is_sugar_over_call() {
-        let resp = HttpClient::send(&Leaf, http::Request::new(Bytes::new())).await.unwrap();
+        let resp = HttpClient::send(&Leaf, http::Request::new(Bytes::new()))
+            .await
+            .unwrap();
         assert_eq!(resp.status(), http::StatusCode::OK);
     }
 }
