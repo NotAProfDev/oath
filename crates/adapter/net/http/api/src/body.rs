@@ -38,7 +38,9 @@ impl<B> ResponseBody<B> {
     /// Wrap already-collected bytes as a one-frame buffered body.
     #[must_use]
     pub fn buffered(bytes: Bytes) -> Self {
-        Self::Buffered { body: Full::new(bytes) }
+        Self::Buffered {
+            body: Full::new(bytes),
+        }
     }
 
     /// Wrap a live streaming backend body.
@@ -102,12 +104,18 @@ mod tests {
     impl Body for Stub {
         type Data = Bytes;
         type Error = HttpError;
-        fn poll_frame(self: Pin<&mut Self>, _: &mut Context<'_>)
-            -> Poll<Option<Result<Frame<Bytes>, HttpError>>> {
+        fn poll_frame(
+            self: Pin<&mut Self>,
+            _: &mut Context<'_>,
+        ) -> Poll<Option<Result<Frame<Bytes>, HttpError>>> {
             Poll::Ready(None)
         }
-        fn is_end_stream(&self) -> bool { self.remaining == 0 }
-        fn size_hint(&self) -> SizeHint { SizeHint::with_exact(self.remaining) }
+        fn is_end_stream(&self) -> bool {
+            self.remaining == 0
+        }
+        fn size_hint(&self) -> SizeHint {
+            SizeHint::with_exact(self.remaining)
+        }
     }
 
     #[test]
@@ -118,6 +126,15 @@ mod tests {
         let wrapped = ResponseBody::streaming(Stub { remaining: 42 });
         assert_eq!(wrapped.size_hint().exact(), ref_hint); // NOT silently None/unbounded
         assert_eq!(wrapped.is_end_stream(), ref_end);
+    }
+
+    #[test]
+    fn streaming_is_end_stream_is_forwarded_not_defaulted() {
+        // Inner `is_end_stream()` is `true`; the trait default is `false`, so this
+        // assertion fails if the override were dropped — unlike a `remaining: 42`
+        // (false) case, which the default would also satisfy.
+        let wrapped = ResponseBody::streaming(Stub { remaining: 0 });
+        assert!(wrapped.is_end_stream());
     }
 
     #[test]
