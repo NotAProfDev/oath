@@ -21,13 +21,14 @@ pub trait Timer: Clone + Send + Sync {
 #[cfg(test)]
 mod tests {
     use super::Timer;
+    use std::future::Future;
     use std::time::{Duration, Instant};
 
     #[derive(Clone)]
     struct FixedTimer(Instant);
 
     impl Timer for FixedTimer {
-        fn sleep(&self, _dur: Duration) -> impl std::future::Future<Output = ()> + Send {
+        fn sleep(&self, _dur: Duration) -> impl Future<Output = ()> + Send {
             std::future::ready(())
         }
         fn now(&self) -> Instant {

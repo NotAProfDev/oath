@@ -28,7 +28,7 @@
 /// outer layer's [`Layer::layer`] method wraps the inner value, producing a
 /// new value that adds the layer's behaviour.
 pub trait Layer<S> {
-    /// The wrapped service type produced by this layer.
+    /// The wrapped type produced by this layer.
     type Service;
 
     /// Wrap `inner` with this layer's behaviour.
@@ -92,7 +92,7 @@ impl<L> ServiceBuilder<L> {
     }
 }
 
-/// The no-op layer — passes the inner service through unchanged.
+/// The no-op layer — passes the inner value through unchanged.
 ///
 /// `Identity` is the initial state of a fresh [`ServiceBuilder`].
 #[derive(Debug, Clone, Copy)]
@@ -109,7 +109,7 @@ impl<S> Layer<S> for Identity {
 /// Compose two [`Layer`] impls into one.
 ///
 /// When assembling the stack, `Inner.layer(leaf)` is applied first, then
-/// `Outer.layer(result)`. `Outer` is therefore the outermost service and the
+/// `Outer.layer(result)`. `Outer` is therefore the outermost wrapper and the
 /// first to handle each request.
 ///
 /// Because [`ServiceBuilder::layer`] produces `Stack<New, L>` with `New` in
