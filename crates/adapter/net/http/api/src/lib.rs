@@ -6,10 +6,13 @@
 //! later slices. No async runtime, `hyper`, `reqwest`, or `serde` here.
 //!
 //! - [`error`] — `HttpError` and `HasErrorKind` impl
+//! - [`client`] — `HttpClient` dependency-inversion seam
 #![forbid(unsafe_code)]
 
 pub mod error;
 pub mod service;
+pub mod client;
 
 pub use error::{BoxError, HttpError};
 pub use service::Service;
+pub use client::HttpClient;
