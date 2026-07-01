@@ -171,7 +171,7 @@ impl HasErrorKind for HttpError {
 }
 ```
 
-Add to `lib.rs`: `pub mod error;` and `pub use error::{BoxError, HttpError};`, plus an `//! - [`error`] — `HttpError`` line in the module-list doc.
+Add to `lib.rs`: `pub mod error;`, `pub use error::{BoxError, HttpError};`, and an `error` entry in the `//!` module-list doc.
 
 - [ ] **Step 5: Run tests**
 

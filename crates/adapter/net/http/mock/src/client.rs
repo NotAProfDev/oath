@@ -27,8 +27,8 @@ impl MockClient {
 
     /// A `200 OK` client whose body is `body`.
     #[must_use]
-    pub fn ok(body: Bytes) -> Self {
-        Self::new(http::StatusCode::OK, [body])
+    pub fn ok(body: impl Into<Bytes>) -> Self {
+        Self::new(http::StatusCode::OK, [body.into()])
     }
 
     /// The requests this client has received, in order.

@@ -44,6 +44,7 @@ impl<B> ResponseBody<B> {
     }
 
     /// Wrap a live streaming backend body.
+    #[must_use]
     pub const fn streaming(body: B) -> Self {
         Self::Streaming { body }
     }
