@@ -4,8 +4,12 @@
 //! `Timer`) and adds the request/reply [`Service`] connection shape. The HTTP
 //! data plane (`HttpError`, `HttpClient`, `ResponseBody`, the layers) lands in
 //! later slices. No async runtime, `hyper`, `reqwest`, or `serde` here.
+//!
+//! - [`error`] — `HttpError` and `HasErrorKind` impl
 #![forbid(unsafe_code)]
 
+pub mod error;
 pub mod service;
 
+pub use error::{BoxError, HttpError};
 pub use service::Service;
