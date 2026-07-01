@@ -1,10 +1,10 @@
 //! A canned-response `Service` leaf that records the requests it receives.
 
-use crate::MockBody;
+use crate::{MockBody, lock};
 use bytes::Bytes;
 use oath_adapter_net_http_api::{HttpError, Service};
 use std::future::Future;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
 
 /// A leaf client that returns a fixed status + body and records every request.
 #[derive(Debug, Clone)]
@@ -34,10 +34,7 @@ impl MockClient {
     /// The requests this client has received, in order.
     #[must_use]
     pub fn recorded_requests(&self) -> Vec<http::Request<Bytes>> {
-        self.requests
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone()
+        lock(&self.requests).clone()
     }
 }
 
@@ -53,10 +50,7 @@ impl Service<http::Request<Bytes>> for MockClient {
         let status = self.status;
         let frames = self.frames.clone();
         async move {
-            requests
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .push(req);
+            lock(&requests).push(req);
             let mut resp = http::Response::new(MockBody::new(frames));
             *resp.status_mut() = status;
             Ok(resp)

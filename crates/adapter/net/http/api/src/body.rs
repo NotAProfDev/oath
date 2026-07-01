@@ -62,13 +62,10 @@ where
         cx: &mut Context<'_>,
     ) -> Poll<Option<Result<Frame<Bytes>, HttpError>>> {
         match self.project() {
-            // `Full`'s error is `Infallible`; the `Err` arm is unreachable.
-            ResponseBodyProj::Buffered { body } => match body.poll_frame(cx) {
-                Poll::Ready(Some(Ok(frame))) => Poll::Ready(Some(Ok(frame))),
-                Poll::Ready(Some(Err(never))) => match never {},
-                Poll::Ready(None) => Poll::Ready(None),
-                Poll::Pending => Poll::Pending,
-            },
+            // `Full`'s error is `Infallible`, so map it away to unify with `HttpError`.
+            ResponseBodyProj::Buffered { body } => body
+                .poll_frame(cx)
+                .map(|frame| frame.map(|res| res.map_err(|never| match never {}))),
             ResponseBodyProj::Streaming { body } => body.poll_frame(cx),
         }
     }

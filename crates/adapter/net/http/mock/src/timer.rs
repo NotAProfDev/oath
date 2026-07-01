@@ -6,10 +6,11 @@
 //! registers a waker released by `advance` — a no-op `sleep` would make
 //! elapsed-time-dependent tests vacuous. Cf. `governor::clock::FakeRelativeClock`.
 
+use crate::lock;
 use oath_adapter_net_api::Timer;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, Waker};
 use std::time::{Duration, Instant};
 
@@ -39,7 +40,7 @@ impl MockTimer {
 
     /// Advance virtual time by `dur`, waking every sleeper now due.
     pub fn advance(&self, dur: Duration) {
-        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut state = lock(&self.state);
         state.now += dur;
         let now = state.now;
         let mut due = Vec::new();
@@ -74,7 +75,7 @@ pub struct Sleep {
 impl Future for Sleep {
     type Output = ();
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
-        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut state = lock(&self.state);
         if state.now >= self.deadline {
             return Poll::Ready(());
         }
@@ -98,7 +99,7 @@ impl Future for Sleep {
 impl Timer for MockTimer {
     fn sleep(&self, dur: Duration) -> impl Future<Output = ()> + Send {
         let deadline = {
-            let state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+            let state = lock(&self.state);
             state.now + dur
         };
         Sleep {
@@ -108,10 +109,7 @@ impl Timer for MockTimer {
     }
 
     fn now(&self) -> Instant {
-        self.state
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .now
+        lock(&self.state).now
     }
 }
 
