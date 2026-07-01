@@ -5,6 +5,7 @@
 //!
 //! - [`service`] — `Service`, `Layer`, `ServiceBuilder`, `Identity`, `Stack`
 //! - [`error_kind`] — `ErrorKind`, `HasErrorKind`
+//! - [`timer`] — `Timer`
 //!
 //! No `tokio`, `hyper`, `reqwest`, `serde`, or `thiserror` may appear in this
 //! crate's dependency graph.
@@ -12,6 +13,8 @@
 
 pub mod error_kind;
 pub mod service;
+pub mod timer;
 
 pub use error_kind::{ErrorKind, HasErrorKind};
 pub use service::{Identity, Layer, Service, ServiceBuilder, Stack};
+pub use timer::Timer;
