@@ -1,0 +1,20 @@
+[package]
+name = "oath-adapter-net-http-mock"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+oath-adapter-net-api = { workspace = true }
+oath-adapter-net-http-api = { workspace = true }
+http = { workspace = true }
+bytes = { workspace = true }
+http-body = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
+http-body-util = { workspace = true }

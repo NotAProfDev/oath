@@ -23,6 +23,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `oath-adapter-net-http-api` HTTP contract — `HttpError` (one concrete
+  transport/middleware error; HTTP statuses pass through as `Ok(Response)`),
+  `HttpClient` (blanket-impl'd `Service` sub-trait), `ResponseBody` (buffer-xor-
+  stream, forwarding `Body` metadata), and `BufferMode`. New `oath-adapter-net-
+  http-mock` test harness (`MockClient`, `MockBody`, `MockTimer`).
 - `oath-model` numeric primitives — the root contract's first real content: `Price`
   (signed fixed-point `i128`), `Quantity` (unsigned `u128` magnitude), `Side`
   (`Buy`/`Sell`), and `ArithmeticError`, with checked `const fn` add/sub that error
