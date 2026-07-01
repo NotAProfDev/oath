@@ -22,7 +22,8 @@ Every subsystem is defined behind a trait. Backends, adapters, transports, and s
 | `oath-core-kernel` | The `Kernel<R, E, P>` single-writer loop |
 | `oath-core` | The Core process binary |
 | `oath-adapter-api` | Harness + `Broker` / `DataProvider` traits for venue adapters |
-| `oath-adapter-net-api` | HTTP/WS composition primitives (`Service`, `Layer`) for adapters |
+| `oath-adapter-net-api` | Transport-neutral composition primitives (`Layer`, `ServiceBuilder`, `Stack`) + `ErrorKind` / `Timer` |
+| `oath-adapter-net-http-api` | HTTP transport contract (`Service`, …) over the kernel |
 | `oath-strategy-api` | User-facing `Strategy` trait and Signal ergonomics (the canonical `Signal` payload lives in `oath-model`, per ADR-0028) |
 | `oath-strategy-host` | Strategy Node binary: hosts user strategies, isolated from Core |
 | `oath-cli` | The first Frontend (MVP) |
@@ -41,6 +42,7 @@ graph TD
     adapterapi[oath-adapter-api] --> model
     stratapi[oath-strategy-api] --> model
     netapi[oath-adapter-net-api]
+    nethttpapi[oath-adapter-net-http-api] --> netapi
 
     risk[oath-core-risk] --> coreapi
     risk --> model
