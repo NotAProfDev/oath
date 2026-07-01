@@ -6,6 +6,7 @@ resolver = "3"
 members = [
   "crates/model",
   "crates/adapter/net/api",
+  "crates/adapter/net/http/api",
   "crates/bus/api",
   "crates/event-log/api",
   "crates/persistence/api",
@@ -40,6 +41,7 @@ categories = ["finance", "asynchronous"]
 # does not treat { workspace = true } path deps as wildcard requirements.
 oath-model = { path = "crates/model", version = "0.1.0" }
 oath-adapter-net-api = { path = "crates/adapter/net/api", version = "0.1.0" }
+oath-adapter-net-http-api = { path = "crates/adapter/net/http/api", version = "0.1.0" }
 oath-bus-api = { path = "crates/bus/api", version = "0.1.0" }
 oath-event-log-api = { path = "crates/event-log/api", version = "0.1.0" }
 oath-persistence-api = { path = "crates/persistence/api", version = "0.1.0" }

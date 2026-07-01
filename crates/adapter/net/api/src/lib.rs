@@ -1,17 +1,21 @@
-//! `oath-adapter-net-api` — composition primitives and capability trait contracts.
+//! `oath-adapter-net-api` — transport-neutral composition primitives + contracts.
 //!
-//! This crate is **zero I/O, zero runtime**. It defines the shared
-//! abstractions that every layer in the network stack depends on:
+//! This crate is **std-only** (zero deps — the signal the ADR-0029 cut is
+//! clean). It defines the shared abstractions every transport's layers depend
+//! on:
 //!
-//! - [`service`] — `Service`, `Layer`, `ServiceBuilder`, `Identity`, `Stack`
+//! - [`compose`] — `Layer`, `ServiceBuilder`, `Identity`, `Stack`
 //! - [`error_kind`] — `ErrorKind`, `HasErrorKind`
+//! - [`timer`] — `Timer`
 //!
-//! No `tokio`, `hyper`, `reqwest`, `serde`, or `thiserror` may appear in this
-//! crate's dependency graph.
+//! `Service` is **not** here — it is a per-transport contract in
+//! `oath-adapter-net-http-api` (ADR-0029 §2).
 #![forbid(unsafe_code)]
 
+pub mod compose;
 pub mod error_kind;
-pub mod service;
+pub mod timer;
 
+pub use compose::{Identity, Layer, ServiceBuilder, Stack};
 pub use error_kind::{ErrorKind, HasErrorKind};
-pub use service::{Identity, Layer, Service, ServiceBuilder, Stack};
+pub use timer::Timer;

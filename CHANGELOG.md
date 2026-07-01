@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Began the ADR-0029 network-adapter repartition: `oath-adapter-net-api` is now the
+  transport-neutral, **std-only** kernel (composition machinery + `ErrorKind` +
+  the new runtime-neutral `Timer` clock); the `Service` request/reply contract moved
+  into the new per-transport crate `oath-adapter-net-http-api`.
 - Restructured the workspace to the process-aligned, spine-inverted crate topology
   of ADR-0009: deleted `oath-engine` and `oath-ingest-core`; split
   `oath-messaging-core` into `oath-bus-api` + `oath-event-log-api`; renamed the
