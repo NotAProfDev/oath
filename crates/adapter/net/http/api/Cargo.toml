@@ -11,6 +11,8 @@ thiserror = { workspace = true }
 http = { workspace = true }
 bytes = { workspace = true }
 http-body = { workspace = true }
+http-body-util = { workspace = true }
+pin-project-lite = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }

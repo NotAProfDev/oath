@@ -9,10 +9,12 @@
 //! - [`client`] — `HttpClient` dependency-inversion seam
 #![forbid(unsafe_code)]
 
+pub mod body;
+pub mod client;
 pub mod error;
 pub mod service;
-pub mod client;
 
+pub use body::{BufferMode, ResponseBody};
+pub use client::HttpClient;
 pub use error::{BoxError, HttpError};
 pub use service::Service;
-pub use client::HttpClient;

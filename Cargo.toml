@@ -57,6 +57,8 @@ oath-core-kernel = { path = "crates/core/kernel", version = "0.1.0" }
 bytes = "1"
 http = "1"
 http-body = "1"
+http-body-util = "0.1"
+pin-project-lite = "0.2"
 futures-core = { version = "0.3", default-features = false }
 futures-sink = { version = "0.3", default-features = false }
 serde = { version = "1", features = ["derive"] }
