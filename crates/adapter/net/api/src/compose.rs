@@ -22,7 +22,7 @@
 //!     .service(());        // leaf: any value (a `Service` leaf lives in net-http-api)
 //! ```
 
-/// Transform one [`Layer`] into another [`Layer`].
+/// Wrap a value of type `S`, producing a new value that adds behaviour.
 ///
 /// Typically a struct that holds configuration and owns an inner value. The
 /// outer layer's [`Layer::layer`] method wraps the inner value, producing a

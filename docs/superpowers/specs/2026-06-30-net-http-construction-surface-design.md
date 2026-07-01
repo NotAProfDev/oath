@@ -60,8 +60,9 @@ the `stack()`/`build()` split with boot-time pacing-coverage validation.
 
 - **`AuthSource`** trait in `net-http-api`; the `Auth` layer; a `NoAuth` impl; the
   `HttpError::Auth` variant.
-- **`Guarded<B>`** response-body newtype carrying `Option<Permit>`; the
-  `Permit` enum over a runtime-neutral semaphore (`async-lock`); the
+- **`Guarded<B>`** response-body newtype carrying
+  `Option<async_lock::SemaphoreGuardArc>` (a runtime-neutral semaphore guard — no
+  `Permit` enum; the rate path holds `None`); the
   `RateLimit`-always-returns-`Guarded<B>` discipline and the two release timings.
 - **`stack()`** (assembly over an arbitrary leaf, in `net-http-api`) +
   **`build()`** (hyper leaf, in `net-http-hyper`); `HttpConfig` (non-generic) and
@@ -447,7 +448,7 @@ All new workspace deps go through `[workspace.dependencies]` per the repo patter
 
 ## Definition of done
 
-- The three contracts (`AuthSource`, `Guarded<B>` + `Permit` + the semaphore choice,
+- The three contracts (`AuthSource`, `Guarded<B>` (permit-carrying) + the semaphore choice,
   `stack()`/`build()` + `RateKey`/`RateLimitConfig<K>`/`BuildError`) are implemented
   as specified, with the mock crate and the tests above.
 - The two ADR amendments are landed (as ADR edits or a short follow-up ADR per the

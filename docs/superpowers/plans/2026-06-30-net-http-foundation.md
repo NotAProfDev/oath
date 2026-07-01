@@ -130,7 +130,7 @@ pub trait Timer: Clone + Send + Sync {
 
 - [ ] **Step 4: Re-export and run the test**
 
-In `lib.rs` add `pub use timer::Timer;` next to the other re-exports, and add `//! - [`timer`] — `Timer`` to the module-list doc comment.
+In `lib.rs` add `pub use timer::Timer;` next to the other re-exports, and add the ``//! - [`timer`] — `Timer` `` line to the module-list doc comment.
 
 Run: `just check && cargo test -p oath-adapter-net-api timer`
 Expected: PASS.
