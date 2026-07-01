@@ -23,6 +23,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `oath-adapter-net-http-api` HTTP contract — `HttpError` (one concrete
+  transport/middleware error; HTTP statuses pass through as `Ok(Response)`),
+  `HttpClient` (blanket-impl'd `Service` sub-trait), `ResponseBody` (buffer-xor-
+  stream, forwarding `Body` metadata), and `BufferMode`. New `oath-adapter-net-
+  http-mock` test harness (`MockClient`, `MockBody`, `MockTimer`).
 - WebSocket transport design: ADR-0032 (contract — untyped duplex frame channel,
   asymmetric `Stream`/RPITIT split, epoch-stamped lifecycle, `WsConnector` leaf,
   per-transport `AuthSource`) and ADR-0033 (resilience — reconnect actor over a
