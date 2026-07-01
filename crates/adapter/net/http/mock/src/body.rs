@@ -48,11 +48,7 @@ impl Body for MockBody {
     }
 
     fn size_hint(&self) -> SizeHint {
-        let total: u64 = self
-            .frames
-            .iter()
-            .map(|f| u64::try_from(f.len()).unwrap_or(u64::MAX))
-            .sum();
+        let total: u64 = self.frames.iter().map(|f| f.len() as u64).sum();
         SizeHint::with_exact(total)
     }
 }
