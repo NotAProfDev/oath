@@ -62,13 +62,23 @@ trait WsConnector {                                  // composition — ADR-0032
         -> impl Future<Output = Result<(WsSink, WsSource, Lifecycle), WsError>> + Send;
 }
 
-struct ReconnectingConnection {                      // usage — new here; what build() yields
+struct ReconnectingConnection {                      // usage — new here; what a ReconnectingConnector yields
     sink: WsSink,           // {send, close} — minimal, as landed
     source: WsSource,       // Stream<Result<Frame, WsError>>
     lifecycle: Lifecycle,   // last-value watch of LifecycleSnapshot (§5)
     control: WsControl,     // force_reconnect(), shutdown()
 }
+
+trait ReconnectingConnector {                        // usage seam — the assembled-stack analogue of WsConnector
+    fn connect(&self, h: http::Request<()>)          // (note: -or the factory trait, -ion the product struct)
+        -> impl Future<Output = Result<ReconnectingConnection, WsError>> + Send;
+}
 ```
+
+`ReconnectingConnector` is to `ReconnectingConnection` what `WsConnector` is to the ADR-0032 §2
+triple: the factory trait `stack()`/`build()` return (§9), whose `connect` hands the adapter the
+richer product exactly once. It is the *usage-seam* peer of the internal *composition-seam*
+`WsConnector`.
 
 The reconnect layer is the exact **`Layer → Service` analogue** from tower: you compose
 `Layer`s but *hold* a `Service` (`ServiceBuilder` yields a `Buffer<Retry<…>>` used as a
@@ -154,7 +164,9 @@ snapshot**, *not* a transition stream and *not* a naive watch of bare `ConnState
 ```rust
 struct LifecycleSnapshot {
     phase: ConnState,     // level: Connected/Stale/Reconnecting/Resumed/Unrecoverable
-    epoch: u64,           // monotonic: bumped on every completed down-cycle
+    epoch: u64,           // monotonic: bumped on every completed down-cycle. Canonical: the epoch
+                          //   echoed inside Connected{epoch}/Resumed{epoch} is this same value
+                          //   (both set from one counter) — consumers diff THIS field.
     down_since: Option<Instant>,
     attempts: u64,        // monotonic
     total_lagged: u64,    // monotonic cumulative — NOT a per-event delta (see §6)
@@ -200,14 +212,17 @@ emit `Lagged`; control bypasses; per-stream policy adapter-side). The mechanism:
   inline and pushes only `Text`/`Binary` into the ring; it **always drains the socket** (§6
   rejects TCP-backpressure) and absorbs pressure on the data side by dropping, never by refusing
   to read. Source wakeups use `event-listener`; an `mpsc` cannot drop-oldest.
-- **Dual bound `min(count, bytes)`.** A frame-count-only bound bakes in IBKR's small-JSON
-  assumption; a generic transport receives multi-MB frames (Coinbase level2 snapshot), so
-  `N × frame_size` OOMs on venue #2. Byte-accounting is one `usize` (`frame.len()` is already in
-  hand), so the ring caps small-frame floods by count *and* memory by bytes, whichever trips
-  first; the byte default is generous (a few MB, per-venue tunable) so IBKR never touches it. A
-  single frame exceeding the byte cap is **kept** (older dropped, lag incremented) — never
-  discard the newest (§6). This is the standard slow-consumer shape (Redis
-  `client-output-buffer-limit`, Kafka `buffer.memory`, Netty `WriteBufferWaterMark`).
+- **Dual bound — a soft `min(count, bytes)` *backlog* budget, not a hard memory cap.** A
+  frame-count-only bound bakes in IBKR's small-JSON assumption; a generic transport receives
+  multi-MB frames (Coinbase level2 snapshot), so `N × frame_size` OOMs on venue #2. Byte-accounting
+  is one `usize` (`frame.len()` is already in hand), so the ring evicts oldest frames once *either*
+  the count *or* the accumulated bytes trips its bound, whichever comes first; the byte default is
+  generous (a few MB, per-venue tunable) so IBKR never touches it. The bound governs the *backlog*,
+  not a single in-flight frame: because the newest is never dropped (§6), a lone frame larger than
+  the whole byte budget is still **admitted** (older evicted, lag incremented) — so the effective
+  peak is `budget + one max frame`, a soft ceiling, not a strict one. This is the standard
+  slow-consumer shape (Redis `client-output-buffer-limit`, Kafka `buffer.memory`, Netty
+  `WriteBufferWaterMark`), all of which bound backlog rather than guaranteeing a hard ceiling.
 - **`Lagged` is a blunt, grammar-blind instrument — recorded as a consequence, not a gap.** A
   single global `total_lagged` cannot attribute drops to a stream (per-stream rings would need
   demux = venue grammar in the transport, the forbidden leak; and the dropped frames are gone).
@@ -238,9 +253,11 @@ for transient loss — but only for transient loss:
 
 Classification is by `ErrorKind` (grammar-free; `WsError: HasErrorKind`, ADR-0032 Consequences),
 adapter-refinable via a hook (venue grammar: which close-code is permanent, à la gRPC
-`UNAUTHENTICATED` vs. `UNAVAILABLE`). An optional `max_attempts → Failed{}` cap stays
-**orthogonal** — voluntary give-up on a *non-critical* stream, a different axis from involuntary
-permanent failure.
+`UNAUTHENTICATED` vs. `UNAVAILABLE`). An optional `max_attempts` cap stays **orthogonal** —
+voluntary give-up on a *non-critical* stream, a different axis from involuntary permanent failure.
+This ADR does not add it to the core `ConnState` (ADR-0032 §4): if a deployment enables it, the
+cap surfaces as its own terminal outcome, deliberately distinct from `Unrecoverable` (which is
+*involuntary* — a classified permanent failure, not a give-up).
 
 ### 8. Send-axis `RateLimit`, the control handle, and expiry ≠ death
 
@@ -346,6 +363,6 @@ inherits its per-attempt-auth and proactive/reactive pacing shape, inverting the
 for a must-maintain feed. Feeds the lifecycle channel to **ADR-0004** (risk) and **ADR-0022**
 (graduated failure); defers subscription replay and order recovery to the adapter per **ADR-0006**
 / **ADR-0003**; routes `Tracing` to the **ADR-0014** Telemetry plane; rests on **ADR-0007**
-(compile-time `impl` seams, no `dyn`). Glossary unchanged — `Spawn`, `ReconnectingConnection`,
-`WsControl`, `LifecycleSnapshot` are implementation vocabulary; [CONTEXT.md](../../CONTEXT.md) is
+(compile-time `impl` seams, no `dyn`). Glossary unchanged — `Spawn`, `ReconnectingConnector`,
+`ReconnectingConnection`, `WsControl`, `LifecycleSnapshot` are implementation vocabulary; [CONTEXT.md](../../CONTEXT.md) is
 domain-only, and IBKR/Binance/Coinbase values are reference data for the adapters.

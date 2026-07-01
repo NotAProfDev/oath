@@ -58,8 +58,10 @@ fn connect(&self, handshake: http::Request<()>)
 WsSource:  impl Stream<Item = Result<Frame, WsError>> + Send
 
 // send half — sending one frame is request-shaped (one-shot), NOT a Sink:
+// `close` takes `self` by value — shutdown is one-way and terminal, so the sink
+// cannot be `send`-used after close is requested (enforced by the type system).
 trait WsSink { fn send(&mut self, f: Frame) -> impl Future<Output = Result<(), WsError>> + Send;
-               fn close(&mut self)          -> impl Future<Output = Result<(), WsError>> + Send; }
+               fn close(self)               -> impl Future<Output = Result<(), WsError>> + Send; }
 ```
 
 - **recv is `futures_core::Stream`**, not a hand-rolled pull iterator. This is the
@@ -104,9 +106,12 @@ Connection health is a **third handle**, not an item interleaved into the data s
 Lifecycle: a last-value channel of ConnState   // watch-style; delivery form resolved in ADR-0033
 enum ConnState {
     Connected { epoch: u64 }, Stale, Reconnecting, Resumed { epoch: u64 },
-    Lagged { count: u64 },        // buffer overflow (§6)
     Unrecoverable,                // a classified non-transient failure — will not self-heal (ADR-0033 §7)
 }
+// Buffer overflow (§6) is NOT a connection phase — it is orthogonal to `ConnState`
+// (a connection can be `Connected` *and* lagging). The `Lagged` signal is carried as
+// the monotonic cumulative `total_lagged` field on the ADR-0033 §5 `LifecycleSnapshot`,
+// not as a variant here — see the delivery-form note below and §6.
 ```
 
 ADR-0033 resolves the delivery form (a `watch` of an epoch-stamped `LifecycleSnapshot`, not a
@@ -167,7 +172,7 @@ we set the consume rate — so frames can queue. Two facts fix the guarantee:
   out**.
 
 The guarantee: **the transport never silently discards; on overflow it drops oldest data frames
-and emits `Lagged{count}` (§4).** The **per-stream drop/keep policy lives adapter-side, after
+and signals the drop by advancing the cumulative `total_lagged` (the `Lagged` signal, §4).** The **per-stream drop/keep policy lives adapter-side, after
 demux** (MD → `LatestValue` drop-to-latest, ADR-0020; orders → reliable handling +
 reconcile-on-`Lagged`). Control frames bypass the buffer (§3). Two distinct "latest" mechanisms
 at two layers — coarse, grammar-blind drop-oldest at the transport (hence the signal); semantic
