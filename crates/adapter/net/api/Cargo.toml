@@ -7,14 +7,3 @@ license.workspace = true
 
 [lints]
 workspace = true
-
-[dependencies]
-bytes = { workspace = true }
-http = { workspace = true }
-http-body = { workspace = true }
-futures-core = { workspace = true }
-futures-sink = { workspace = true }
-
-# cargo-machete: deps declared ahead of first use; prune from `ignored` as they are adopted.
-[package.metadata.cargo-machete]
-ignored = ["bytes", "futures-core", "futures-sink", "http", "http-body"]

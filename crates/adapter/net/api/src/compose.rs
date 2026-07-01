@@ -1,64 +1,32 @@
-//! Core composition primitives: `Service`, `Layer`, `ServiceBuilder`, `Identity`, `Stack`.
+//! Composition machinery: `Layer`, `ServiceBuilder`, `Identity`, `Stack`.
 //!
-//! These are the building blocks for the entire network stack. Every middleware
-//! concern is expressed as a [`Layer`] that wraps any [`Service`], and
-//! [`ServiceBuilder`] composes them at compile time with no virtual dispatch.
+//! These compose **anything** — `Layer<S>` carries no `Service` bound (ADR-0029
+//! §3), so the same machinery composes an HTTP `Service` stack today and a WS
+//! subscription stack tomorrow.
 //!
 //! # Ordering invariant
 //!
 //! The **first** `.layer()` call is permanently the outermost wrapper and
-//! therefore the first to handle each request. Subsequent calls are nested
-//! progressively further inward.
+//! therefore the first to handle each request.
 //!
-//! ```no_run
-//! # use oath_adapter_net_api::service::{Layer, Service, ServiceBuilder};
-//! # use std::future::Future;
+//! ```
+//! # use oath_adapter_net_api::compose::{Layer, ServiceBuilder};
 //! # struct TracingLayer;
 //! # struct MetricsLayer;
-//! # struct Transport;
 //! # impl<S> Layer<S> for TracingLayer { type Service = S; fn layer(&self, s: S) -> S { s } }
 //! # impl<S> Layer<S> for MetricsLayer { type Service = S; fn layer(&self, s: S) -> S { s } }
-//! # impl Service<()> for Transport {
-//! #     type Response = ();
-//! #     type Error = ();
-//! #     fn call(&self, _: ()) -> impl Future<Output = Result<(), ()>> + Send {
-//! #         async { Ok(()) }
-//! #     }
-//! # }
-//! // TracingLayer is added first → it is outermost → handles every request first.
-//! let svc = ServiceBuilder::new()
-//!     .layer(TracingLayer) // outermost: first to see each request
-//!     .layer(MetricsLayer) // innermost of the two wrappers
-//!     .service(Transport); // leaf: performs actual I/O
+//! // TracingLayer is added first → outermost → wraps everything else.
+//! let _svc = ServiceBuilder::new()
+//!     .layer(TracingLayer) // outermost
+//!     .layer(MetricsLayer) // inner
+//!     .service(());        // leaf: any value (a `Service` leaf lives in net-http-api)
 //! ```
 
-use std::future::Future;
-
-/// A single async call: request in, `Result` out.
+/// Transform one [`Layer`] into another [`Layer`].
 ///
-/// Implementations must not require `&mut self` — services are shared across
-/// tasks and must therefore be `Send + Sync`. Backpressure is handled inside
-/// `call` (e.g. by awaiting a semaphore permit) rather than through a separate
-/// `poll_ready`.
-///
-/// Use RPITIT for the return type — no `async-trait`, no `dyn`, no per-call
-/// allocation.
-pub trait Service<Req> {
-    /// The value produced on success.
-    type Response;
-
-    /// The error produced on failure.
-    type Error;
-
-    /// Drive the request to completion.
-    fn call(&self, req: Req) -> impl Future<Output = Result<Self::Response, Self::Error>> + Send;
-}
-
-/// Transform one [`Service`] into another [`Service`].
-///
-/// Typically a struct that holds configuration and owns an inner service. The
-/// outer layer's [`Layer::layer`] method wraps the inner service, producing a
-/// new [`Service`] that adds the layer's behaviour.
+/// Typically a struct that holds configuration and owns an inner value. The
+/// outer layer's [`Layer::layer`] method wraps the inner value, producing a
+/// new value that adds the layer's behaviour.
 pub trait Layer<S> {
     /// The wrapped service type produced by this layer.
     type Service;
@@ -73,7 +41,7 @@ pub trait Layer<S> {
 /// the outermost wrapper and therefore the first to execute on each request.
 ///
 /// ```
-/// # use oath_adapter_net_api::service::{Identity, ServiceBuilder};
+/// # use oath_adapter_net_api::compose::{Identity, ServiceBuilder};
 /// let _builder = ServiceBuilder::new(); // starts with Identity (no-op)
 /// ```
 #[derive(Debug, Clone)]
@@ -111,9 +79,9 @@ impl<L> ServiceBuilder<L> {
         }
     }
 
-    /// Finalize the stack by wrapping a concrete service.
+    /// Finalize the stack by wrapping a concrete value.
     ///
-    /// Consumes the builder and returns the fully composed `Service` value.
+    /// Consumes the builder and returns the fully composed value.
     /// The concrete type is fully resolved at compile time — no boxing, no
     /// `dyn`.
     pub fn service<S>(self, service: S) -> L::Service
