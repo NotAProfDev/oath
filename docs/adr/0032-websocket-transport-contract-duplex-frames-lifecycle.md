@@ -21,7 +21,11 @@ gateway session — the `set-cookie` cookies (gateway mode, e.g. `x-sess-uuid`) 
 unless `/tickle` is called (~every 60s). So the WS rides **on top of** the REST session,
 which is why HTTP (ADR-0030) was built first. Market data is **conflated server-side to
 ~500ms per instrument** over ~100 subscription lines; `smd` subscriptions **self-terminate
-after 10 minutes**. These are reference data for the adapter, not domain terms.
+after ~15 minutes** (raised from 10 by IBKR ~2026-04; the server does not auto-unsubscribe on
+expiry, so the client `umd+`s then `smd+`s to refresh). Expiry is **silent and per-topic**:
+inbound ticks for the affected `conid` simply stop — no close frame, no error — while the
+connection, session, and system heartbeat all stay healthy. These are reference data for the
+adapter, not domain terms.
 
 ## Decision
 
@@ -97,9 +101,19 @@ IBKR from dropping us.
 Connection health is a **third handle**, not an item interleaved into the data stream:
 
 ```rust
-Lifecycle: impl Stream<Item = ConnState>   // (a watch-style last-value is an ADR-0033 sub-choice)
-enum ConnState { Connected { epoch: u64 }, Stale, Reconnecting, Resumed { epoch: u64 }, Lagged { count: u64 } }
+Lifecycle: a last-value channel of ConnState   // watch-style; delivery form resolved in ADR-0033
+enum ConnState {
+    Connected { epoch: u64 }, Stale, Reconnecting, Resumed { epoch: u64 },
+    Lagged { count: u64 },        // buffer overflow (§6)
+    Unrecoverable,                // a classified non-transient failure — will not self-heal (ADR-0033 §7)
+}
 ```
+
+ADR-0033 resolves the delivery form (a `watch` of an epoch-stamped `LifecycleSnapshot`, not a
+transition stream — its §5 explains why, and why `Lagged`'s count is carried as a
+monotonic cumulative total under last-value semantics). `Unrecoverable` is emitted by the
+resilience layer when it classifies a permanent failure rather than retrying it forever
+(ADR-0033 §7); it is the one terminal state — every other variant is transient.
 
 - **The data stream stays `Result<Frame, WsError>` (§2), uncontaminated by control variants.**
 - **The feed-*down* edge is first-class.** For a trading system the safety-critical event is
@@ -137,7 +151,7 @@ subscriptions. So:
 
   The same `Resumed` (or `Lagged`, §6) signal thus drives two different adapter responses. This
   is where the WS and REST transports meet in `oath-adapter-ibkr`, exactly as ADR-0029 foresaw.
-  IBKR's 10-minute `smd` self-termination gives resubscription a **second trigger** beyond
+  IBKR's ~15-minute `smd` self-termination gives resubscription a **second trigger** beyond
   reconnect: a periodic refresh timer the adapter owns.
 
 ### 6. Backpressure: a uniform, no-silent-drop guarantee at the transport; per-stream policy in the adapter
@@ -236,13 +250,14 @@ picked up — the streaming analogue of ADR-0031 §1's per-attempt re-stamp.
   primitives" and is updated to show the per-transport crates when they are built (deferred, as
   for ADR-0029–0031).
 - **The adapter (`oath-adapter-ibkr`) owns:** the subscription grammar, JSON/frame parsing,
-  demux, subscription replay + the periodic 10-min `smd` refresh, the differential
+  demux, subscription replay + the periodic ~15-min `smd` refresh, the differential
   `Resumed`/`Lagged` recovery (MD resubscribe vs. order REST-reconcile, ADR-0006), the per-stream
   backpressure policy, and the single `IbkrAuthSource`.
 - **The lifecycle channel becomes a first-class input to risk/order control** (ADR-0004 /
   ADR-0022), not merely an internal reconnect detail.
-- **Recv-side backpressure is settled here** (§6), so ADR-0033 implements the buffer mechanism
-  with no contract change.
+- **Recv-side backpressure is settled here** (§6): the *guarantee* (drop-oldest data + `Lagged`,
+  control bypasses) is unchanged by ADR-0033, which only refines how the count is carried under
+  the §4 last-value channel (cumulative `total_lagged`) and adds the dual count+byte bound.
 
 ## Relationships
 
