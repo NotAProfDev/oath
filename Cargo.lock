@@ -218,6 +218,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "oath-adapter-net-ws-api"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+]
+
+[[package]]
 name = "oath-bus-api"
 version = "0.1.0"
 dependencies = [
