@@ -7,12 +7,15 @@
 //! stays in the adapter (ADR-0003).
 //!
 //! - [`frame`] — the `Frame`/`CloseFrame` transport vocabulary
+//! - [`error`] — `WsError` and its `HasErrorKind` impl
 //!
 //! The resilience stack (reconnect actor, heartbeat, buffer, `stack()`) and
 //! the tungstenite backend land in later slices. No async runtime, `tokio`,
 //! `tokio-tungstenite`, or `serde` here.
 #![forbid(unsafe_code)]
 
+pub mod error;
 pub mod frame;
 
+pub use error::{BoxError, WsError};
 pub use frame::{CloseFrame, Frame};

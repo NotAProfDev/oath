@@ -10,3 +10,5 @@ workspace = true
 
 [dependencies]
 bytes = { workspace = true }
+oath-adapter-net-api = { workspace = true }
+thiserror = { workspace = true }
