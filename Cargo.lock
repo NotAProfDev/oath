@@ -277,6 +277,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "oath-adapter-net-ws-mock"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "futures-core",
+ "futures-util",
+ "http",
+ "oath-adapter-net-api",
+ "oath-adapter-net-ws-api",
+ "tokio",
+]
+
+[[package]]
 name = "oath-bus-api"
 version = "0.1.0"
 dependencies = [

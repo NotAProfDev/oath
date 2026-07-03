@@ -9,6 +9,7 @@ members = [
   "crates/adapter/net/http/api",
   "crates/adapter/net/http/mock",
   "crates/adapter/net/ws/api",
+  "crates/adapter/net/ws/mock",
   "crates/bus/api",
   "crates/event-log/api",
   "crates/persistence/api",
@@ -46,6 +47,7 @@ oath-adapter-net-api = { path = "crates/adapter/net/api", version = "0.1.0" }
 oath-adapter-net-http-api = { path = "crates/adapter/net/http/api", version = "0.1.0" }
 oath-adapter-net-http-mock = { path = "crates/adapter/net/http/mock", version = "0.1.0" }
 oath-adapter-net-ws-api = { path = "crates/adapter/net/ws/api", version = "0.1.0" }
+oath-adapter-net-ws-mock = { path = "crates/adapter/net/ws/mock", version = "0.1.0" }
 oath-bus-api = { path = "crates/bus/api", version = "0.1.0" }
 oath-event-log-api = { path = "crates/event-log/api", version = "0.1.0" }
 oath-persistence-api = { path = "crates/persistence/api", version = "0.1.0" }
