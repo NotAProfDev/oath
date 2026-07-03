@@ -11,6 +11,7 @@ workspace = true
 [dependencies]
 async-watch = { workspace = true }
 bytes = { workspace = true }
+http = { workspace = true }
 oath-adapter-net-api = { workspace = true }
 thiserror = { workspace = true }
 futures-core = { workspace = true }

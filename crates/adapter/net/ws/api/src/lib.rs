@@ -11,18 +11,22 @@
 //! - [`sink`] — `WsSink`, the owned send half
 //! - [`source`] — `WsSource`, the owned recv half
 //! - [`lifecycle`] — the out-of-band `Lifecycle` watch channel
+//! - [`connector`] — `WsConnector`, the composition seam (handshake in, three
+//!   handles out)
 //!
 //! The resilience stack (reconnect actor, heartbeat, buffer, `stack()`) and
 //! the tungstenite backend land in later slices. No async runtime, `tokio`,
 //! `tokio-tungstenite`, or `serde` here.
 #![forbid(unsafe_code)]
 
+pub mod connector;
 pub mod error;
 pub mod frame;
 pub mod lifecycle;
 pub mod sink;
 pub mod source;
 
+pub use connector::WsConnector;
 pub use error::{BoxError, WsError};
 pub use frame::{CloseFrame, Frame};
 pub use lifecycle::{ConnState, Lifecycle, LifecycleSender, LifecycleSnapshot};

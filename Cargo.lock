@@ -270,6 +270,7 @@ dependencies = [
  "bytes",
  "futures-core",
  "futures-util",
+ "http",
  "oath-adapter-net-api",
  "thiserror",
  "tokio",
