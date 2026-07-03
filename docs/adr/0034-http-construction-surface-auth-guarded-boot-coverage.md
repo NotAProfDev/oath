@@ -88,6 +88,17 @@ classification, not "absent"): `stack()`/`build()` return
 bucket is a **boot failure**, not a first-live-order 429 → 15-minute IBKR penalty box.
 0031 §3's runtime `Throttled` fail-closed is demoted to an unreachable backstop.
 
+### 4. HTTP error statuses are not error-ified (clarifies 0030 §5)
+
+`HttpError` carries **transport/middleware failures only**. HTTP 4xx/5xx
+*statuses* are not converted to errors: they flow through as
+`Ok(http::Response)` with the body intact, so the adapter reads the venue's
+rejection payload and the stack never discards it (0030 §5, whose `HttpError`
+examples were always middleware failures — timeout, retry-exhausted, body-read —
+never statuses). The resilience layers decide by **peeking** `Response::status()`
+(5xx → server-error signal) and the 429 `Retry-After` header — read-only; the
+response continues downstream unchanged.
+
 ## Consequences
 
 - `net-http-api` gains `async-lock` (+ `event-listener`) and stays runtime-free; the
