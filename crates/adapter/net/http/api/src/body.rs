@@ -130,7 +130,10 @@ where
     // projection: it treats the borrowed `permit: &mut Option<SemaphoreGuardArc>`
     // field as if `this` owned the guard's `Drop`, and its own suggested fix
     // (dropping `this` before `*this.permit = None`) would not compile.
-    #[allow(clippy::significant_drop_tightening)]
+    #[expect(
+        clippy::significant_drop_tightening,
+        reason = "permit is deliberately held until the terminal frame, then released via `*this.permit = None`; the lint's drop-sooner fix is wrong here"
+    )]
     fn poll_frame(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
@@ -260,7 +263,10 @@ mod tests {
     // See the `poll_frame` justification above: `significant_drop_tightening`
     // false-positives on `Guarded`'s `Option<SemaphoreGuardArc>` field even
     // when it's `None`.
-    #[allow(clippy::significant_drop_tightening)]
+    #[expect(
+        clippy::significant_drop_tightening,
+        reason = "holds the guarded body across assertions"
+    )]
     #[test]
     fn guarded_forwards_size_hint_and_is_end_stream() {
         let reference = Frames::new([b"ab", b"cde"]);
@@ -276,7 +282,10 @@ mod tests {
     // this test (proving eager release *while still alive*), so
     // `significant_drop_tightening`'s "drop it sooner" suggestion is exactly
     // what must NOT happen here.
-    #[allow(clippy::significant_drop_tightening)]
+    #[expect(
+        clippy::significant_drop_tightening,
+        reason = "the test holds the guarded body across assertions to prove release at stream-end while still alive"
+    )]
     #[test]
     fn permit_releases_on_terminal_frame_before_drop() {
         let sem = Arc::new(Semaphore::new(1));
@@ -300,7 +309,10 @@ mod tests {
     // Same rationale as `permit_releases_on_terminal_frame_before_drop`: the
     // scoped block controls exactly when `body` drops, which is the behavior
     // under test.
-    #[allow(clippy::significant_drop_tightening)]
+    #[expect(
+        clippy::significant_drop_tightening,
+        reason = "the scoped block controls exactly when the body drops — the behavior under test"
+    )]
     #[test]
     fn permit_releases_on_early_drop() {
         let sem = Arc::new(Semaphore::new(1));
