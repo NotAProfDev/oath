@@ -28,7 +28,10 @@ pub enum WsError {
     #[error("authorization failed: {0}")]
     Auth(String),
     /// The peer closed the connection (close frame, possibly with code+reason).
-    #[error("connection closed by peer")]
+    #[error("connection closed by peer{}", .0.as_ref().map_or_else(
+        String::new,
+        |frame| format!(" (code {}, reason {:?})", frame.code, frame.reason),
+    ))]
     Closed(Option<CloseFrame>),
     /// A backend error that does not fit another variant.
     #[error("websocket error")]
@@ -94,6 +97,22 @@ mod tests {
         assert_eq!(
             WsError::auth("session expired").to_string(),
             "authorization failed: session expired"
+        );
+    }
+
+    #[test]
+    fn closed_surfaces_code_and_reason_when_present() {
+        assert_eq!(
+            WsError::Closed(None).to_string(),
+            "connection closed by peer"
+        );
+        let close = CloseFrame {
+            code: 1006,
+            reason: "abnormal".to_owned(),
+        };
+        assert_eq!(
+            WsError::Closed(Some(close)).to_string(),
+            "connection closed by peer (code 1006, reason \"abnormal\")"
         );
     }
 
