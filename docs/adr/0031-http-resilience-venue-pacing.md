@@ -1,5 +1,10 @@
 # HTTP resilience and venue pacing: the layer stack, order-safe retry, keyed rate/concurrency limits, circuit breaker
 
+> **Amended by [ADR-0034](0034-http-construction-surface-auth-guarded-boot-coverage.md):**
+> §3's `Permit` enum is replaced by `Guarded<B>` carrying
+> `Option<async_lock::SemaphoreGuardArc>`, released at the *earlier of* stream-end or
+> drop; `RateLimitConfig<K>` must be total over `RateKey::all()` at construction.
+
 [ADR-0030](0030-http-transport-contract-wire-bytes-streaming-composition.md) fixed the
 HTTP transport contract (bytes in, streaming bytes out, `HttpClient`, hyper backend).
 This ADR specifies the **middleware that wraps it** — the default layer stack and its

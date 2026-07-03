@@ -1,5 +1,10 @@
 # HTTP transport contract: untyped wire bytes, streaming-by-composition, unified `HttpError`
 
+> **Amended by [ADR-0034](0034-http-construction-surface-auth-guarded-boot-coverage.md):**
+> the dependency charter is "free of any async *runtime*" (`async-lock` is allowed);
+> `HttpError` gains an `Auth` variant; `ResponseBody<B>` must forward
+> `is_end_stream`/`size_hint`; HTTP error statuses pass through as `Ok(Response)`.
+
 [ADR-0029](0029-network-adapter-stack-transport-split-compile-time-composition.md)
 placed `Service` and the HTTP-specific contracts in `oath-adapter-net-http-api` over
 the transport-neutral kernel. This ADR fixes **what that HTTP `Service` carries** —
