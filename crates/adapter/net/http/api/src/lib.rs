@@ -19,7 +19,7 @@ pub mod client;
 pub mod error;
 pub mod service;
 
-pub use auth::{AuthSource, NoAuth};
+pub use auth::{Auth, AuthSource, NoAuth};
 pub use body::{BufferMode, ResponseBody};
 pub use client::HttpClient;
 pub use error::{BoxError, HttpError};
