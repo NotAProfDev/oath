@@ -126,10 +126,10 @@ where
     type Data = Bytes;
     type Error = HttpError;
 
-    // `significant_drop_tightening` false-positives on the `pin_project!`
-    // projection: it treats the borrowed `permit: &mut Option<SemaphoreGuardArc>`
-    // field as if `this` owned the guard's `Drop`, and its own suggested fix
-    // (dropping `this` before `*this.permit = None`) would not compile.
+    // `significant_drop_tightening` correctly flags the deliberately-held guard in the
+    // `pin_project!` projection: the borrowed `permit: &mut Option<SemaphoreGuardArc>`
+    // field must stay alive until the terminal frame. The lint's drop-sooner fix is wrong here —
+    // the permit must live until `*this.permit = None` at stream-end.
     #[expect(
         clippy::significant_drop_tightening,
         reason = "permit is deliberately held until the terminal frame, then released via `*this.permit = None`; the lint's drop-sooner fix is wrong here"
@@ -260,9 +260,8 @@ mod tests {
         }
     }
 
-    // See the `poll_frame` justification above: `significant_drop_tightening`
-    // false-positives on `Guarded`'s `Option<SemaphoreGuardArc>` field even
-    // when it's `None`.
+    // The lint correctly flags the deliberately-held guard; we suppress it here because
+    // the test must hold the guarded body across assertions to verify release behavior.
     #[expect(
         clippy::significant_drop_tightening,
         reason = "holds the guarded body across assertions"

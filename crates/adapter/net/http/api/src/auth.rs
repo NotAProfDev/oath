@@ -81,7 +81,8 @@ where
 /// Sits **just outside** [`Auth`] in the canonical stack, so on any key
 /// collision the dynamic credential wins — `Auth` is the last writer before the
 /// leaf (ADR-0034 §1). Writes with insert (last-writer) semantics; multi-valued
-/// defaults are not supported.
+/// defaults are not supported. A default also overrides any value the caller already
+/// set for the same key on the request (precedence: caller-set < static defaults < `Auth`).
 #[derive(Debug, Clone)]
 pub struct SetHeaders<S> {
     inner: S,

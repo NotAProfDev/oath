@@ -33,7 +33,7 @@ pub trait AuthSource: Clone + Send + Sync {
 - **Mutates `&mut http::Request<Bytes>` in place** — covers static bearer, HMAC over the
   buffered body, async OAuth refresh, and cookie/no-op, with no per-call `HeaderMap`
   allocation.
-- **Errors are `HttpError`** via a new `Auth(String)` variant (→ `ErrorKind::Auth`) —
+- **Errors are `HttpError`** via the `Auth(String)` variant (added in PR 2 for this seam) (→ `ErrorKind::Auth`) —
   both types live in `net-http-api`; no `From`/`map_err` shim.
 - **`NoAuth`** (ready `Ok(())`) is the IBKR impl — the local gateway holds the session
   cookie.
