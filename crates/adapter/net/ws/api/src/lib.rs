@@ -8,6 +8,8 @@
 //!
 //! - [`frame`] — the `Frame`/`CloseFrame` transport vocabulary
 //! - [`error`] — `WsError` and its `HasErrorKind` impl
+//! - [`sink`] — `WsSink`, the owned send half
+//! - [`source`] — `WsSource`, the owned recv half
 //!
 //! The resilience stack (reconnect actor, heartbeat, buffer, `stack()`) and
 //! the tungstenite backend land in later slices. No async runtime, `tokio`,
@@ -16,6 +18,10 @@
 
 pub mod error;
 pub mod frame;
+pub mod sink;
+pub mod source;
 
 pub use error::{BoxError, WsError};
 pub use frame::{CloseFrame, Frame};
+pub use sink::WsSink;
+pub use source::WsSource;
