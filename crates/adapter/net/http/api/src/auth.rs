@@ -76,9 +76,52 @@ where
     }
 }
 
+/// Stamps static default headers (venue base headers, `User-Agent`, …) onto every request.
+///
+/// Sits **just outside** [`Auth`] in the canonical stack, so on any key
+/// collision the dynamic credential wins — `Auth` is the last writer before the
+/// leaf (ADR-0034 §1). Writes with insert (last-writer) semantics; multi-valued
+/// defaults are not supported.
+#[derive(Debug, Clone)]
+pub struct SetHeaders<S> {
+    inner: S,
+    headers: http::HeaderMap,
+}
+
+impl<S> SetHeaders<S> {
+    /// Wrap `inner`, stamping `headers` onto every request.
+    #[must_use]
+    pub const fn new(inner: S, headers: http::HeaderMap) -> Self {
+        Self { inner, headers }
+    }
+}
+
+impl<S> Service<http::Request<Bytes>> for SetHeaders<S>
+where
+    S: Service<http::Request<Bytes>, Error = HttpError> + Sync,
+{
+    type Response = S::Response;
+    type Error = HttpError;
+
+    // Not `async fn`: the trait requires the returned future to be `Send`,
+    // which only the desugared form can promise (ADR-0029 §4).
+    #[allow(clippy::manual_async_fn)]
+    fn call(
+        &self,
+        mut req: http::Request<Bytes>,
+    ) -> impl Future<Output = Result<S::Response, HttpError>> + Send {
+        async move {
+            for (name, value) in &self.headers {
+                req.headers_mut().insert(name.clone(), value.clone());
+            }
+            self.inner.call(req).await
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{Auth, AuthSource, NoAuth};
+    use super::{Auth, AuthSource, NoAuth, SetHeaders};
     use crate::{HttpError, Service};
     use bytes::Bytes;
     use oath_adapter_net_api::{ErrorKind, HasErrorKind};
@@ -210,5 +253,46 @@ mod tests {
         let client = Auth::new(Recording::default(), NoAuth);
         let fut = client.call(http::Request::new(Bytes::new()));
         assert_send(&fut);
+    }
+
+    #[tokio::test]
+    async fn set_headers_stamps_static_defaults() {
+        let leaf = Recording::default();
+        let mut headers = http::HeaderMap::new();
+        headers.insert("user-agent", http::HeaderValue::from_static("oath"));
+        let client = SetHeaders::new(leaf.clone(), headers);
+        client.call(http::Request::new(Bytes::new())).await.unwrap();
+        assert_eq!(
+            leaf.seen()[0].headers()["user-agent"],
+            http::HeaderValue::from_static("oath")
+        );
+    }
+
+    #[tokio::test]
+    async fn dynamic_credentials_beat_static_headers_on_collision() {
+        // The pinned composition: SetHeaders sits OUTSIDE Auth, so Auth is the
+        // last writer before the leaf and dynamic credentials win (ADR-0034 §1).
+        #[derive(Clone)]
+        struct DynKey;
+        impl AuthSource for DynKey {
+            fn authorize(
+                &self,
+                req: &mut http::Request<Bytes>,
+            ) -> impl Future<Output = Result<(), HttpError>> + Send {
+                req.headers_mut()
+                    .insert("x-api-key", http::HeaderValue::from_static("dynamic"));
+                std::future::ready(Ok(()))
+            }
+        }
+
+        let leaf = Recording::default();
+        let mut headers = http::HeaderMap::new();
+        headers.insert("x-api-key", http::HeaderValue::from_static("static"));
+        let client = SetHeaders::new(Auth::new(leaf.clone(), DynKey), headers);
+        client.call(http::Request::new(Bytes::new())).await.unwrap();
+        assert_eq!(
+            leaf.seen()[0].headers()["x-api-key"],
+            http::HeaderValue::from_static("dynamic")
+        );
     }
 }
