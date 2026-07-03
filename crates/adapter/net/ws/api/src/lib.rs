@@ -10,6 +10,7 @@
 //! - [`error`] — `WsError` and its `HasErrorKind` impl
 //! - [`sink`] — `WsSink`, the owned send half
 //! - [`source`] — `WsSource`, the owned recv half
+//! - [`lifecycle`] — the out-of-band `Lifecycle` watch channel
 //!
 //! The resilience stack (reconnect actor, heartbeat, buffer, `stack()`) and
 //! the tungstenite backend land in later slices. No async runtime, `tokio`,
@@ -18,10 +19,12 @@
 
 pub mod error;
 pub mod frame;
+pub mod lifecycle;
 pub mod sink;
 pub mod source;
 
 pub use error::{BoxError, WsError};
 pub use frame::{CloseFrame, Frame};
+pub use lifecycle::{ConnState, Lifecycle, LifecycleSender, LifecycleSnapshot};
 pub use sink::WsSink;
 pub use source::WsSource;
