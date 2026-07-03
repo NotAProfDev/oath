@@ -6,7 +6,7 @@
 //! - [`service`] — the `Service` request/reply connection shape
 //! - [`error`] — `HttpError` and its `HasErrorKind` impl
 //! - [`client`] — the `HttpClient` dependency-inversion seam
-//! - [`body`] — `ResponseBody` and `BufferMode`
+//! - [`body`] — `ResponseBody`, `BufferMode`, and the permit-carrying `Guarded`
 //! - [`auth`] — the `AuthSource` seam, `NoAuth`, and the `Auth`/`SetHeaders` layers
 //!
 //! The resilience layers, `stack`/`build` assembly, and backends land in later
@@ -20,7 +20,7 @@ pub mod error;
 pub mod service;
 
 pub use auth::{Auth, AuthSource, NoAuth, SetHeaders};
-pub use body::{BufferMode, ResponseBody};
+pub use body::{BufferMode, Guarded, ResponseBody};
 pub use client::HttpClient;
 pub use error::{BoxError, HttpError};
 pub use service::Service;
