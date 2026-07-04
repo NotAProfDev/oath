@@ -311,8 +311,8 @@ pub enum Scope {
 /// The per-request pacing directive, carried as an `http::Request` extension.
 ///
 /// The adapter stamps it when it builds each request (it knows the endpoint).
-/// An **absent** directive defaults to [`Scope::Global`] — you cannot bypass the
-/// account-wide budget by forgetting to stamp. `Clone` so it survives the
+/// An **absent** directive is **rejected fail-closed** (ADR-0034 Amendment #1) —
+/// a forgotten stamp must not silently fly global-only. `Clone` so it survives the
 /// per-attempt request clone `Retry` performs (Slice 1).
 #[derive(Debug, Clone)]
 pub struct RateScope<K> {
@@ -456,15 +456,14 @@ Replace the `use super::…` line in the `tests` module and add these tests (the
     }
 
     #[tokio::test]
-    async fn absent_directive_is_global_paced() {
-        let timer = MockTimer::new();
-        // global burst 10 -> 11th throttles.
-        let svc = layer(timer, Duration::from_secs(0)).layer(MockClient::ok("ok"));
-        for _ in 0..10 {
-            svc.call(http::Request::new(Bytes::new())).await.expect("within global burst");
-        }
+    async fn absent_directive_fails_closed() {
+        // A request with no RateScope extension is rejected, never sent
+        // (ADR-0034 Amendment #1) — "global only" must be an explicit Scope::Global.
+        let leaf = Leaf::ok(b"ok");
+        let svc = layer(MockTimer::new(), Duration::from_secs(0)).layer(leaf.clone());
         let err = svc.call(http::Request::new(Bytes::new())).await.unwrap_err();
-        assert_eq!(err, HttpError::Throttled);
+        assert!(matches!(err, HttpError::Throttled));
+        assert_eq!(leaf.calls(), 0, "absent directive must not reach the leaf");
     }
 
     #[tokio::test]
@@ -760,11 +759,11 @@ where
         req: http::Request<Bytes>,
     ) -> impl Future<Output = Result<Self::Response, HttpError>> + Send {
         async move {
-            let directive = req
-                .extensions()
-                .get::<RateScope<K>>()
-                .cloned()
-                .unwrap_or(RateScope { scope: Scope::Global, key: None });
+            // Absent directive fails closed (ADR-0034 Amendment #1): a forgotten
+            // stamp must never fly unpaced or global-only.
+            let Some(directive) = req.extensions().get::<RateScope<K>>().cloned() else {
+                return Err(HttpError::Throttled);
+            };
             let permit = self.acquire(&directive).await?;
             let resp = self.inner.call(req).await?;
             let (parts, body) = resp.into_parts();
@@ -894,7 +893,7 @@ Add to `CHANGELOG.md` `[Unreleased] → Added` (after the PR 4 boot-coverage ent
   `RateLimit<S, K, T>` service + `RateLimitLayer<K, T>` factory (`net-api::Layer`):
   proactive per-endpoint pacing (token-bucket + concurrency policies) built from a
   validated `RateLimitConfig`, driven by `net-api::Timer` (mockable clock). Adds the
-  `RateScope`/`Scope` per-request directive (absent → global-paced; `None` → opt-out;
+  `RateScope`/`Scope` per-request directive (absent → fails closed; `None` → opt-out;
   a runtime coverage gap fails closed as `Throttled`, never sent). `LimitPolicy::
   TokenBucket` gains `per: Duration` for sub-1/second venue limits, and the
   ≤1-concurrency-permit invariant is a boot check (`BuildError::MultipleConcurrency`).
