@@ -20,6 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Policies under `core/`; relocated `oath-net-core` to `oath-adapter-net-api`; and
   added `oath-core-api`, `oath-core-kernel`, and the `oath-core`, `oath-strategy-host`,
   `oath-cli`, and `oath-supervisor` process crates.
+- `MockTimer` relocated from `oath-adapter-net-http-mock` into a new dev-only
+  `oath-adapter-net-mock` crate beside the `Timer` contract in
+  `oath-adapter-net-api`, so the HTTP and (forthcoming) WebSocket mock stacks
+  share one fake clock without cross-depending (ADR-0034 §Amendments.4).
+  `oath-adapter-net-http-mock` now provides only `MockClient`/`MockBody`.
 
 ### Added
 
