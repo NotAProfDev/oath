@@ -235,6 +235,22 @@ impl Breaker {
             BreakerState::Open { .. } => {},
         }
     }
+
+    /// Resolve a Half-Open probe whose call was **abandoned** (the future was
+    /// dropped by caller cancellation, or the inner service panicked) before its
+    /// outcome could be recorded. Only meaningful in Half-Open: reopen so the
+    /// episode ends and the circuit self-heals after `cooldown` — a probe with an
+    /// unknown outcome must not optimistically close. A **no-op** in `Closed` (a
+    /// cancelled call is not a host-health signal, so it must not advance the trip
+    /// streak) and in `Open` (already tripped). This is what makes "every admitted
+    /// probe reaches a decisive resolution" hold even under cancellation.
+    pub(crate) fn on_abandoned_probe(&mut self, now: Instant) {
+        if matches!(self.state, BreakerState::HalfOpen { .. }) {
+            self.state = BreakerState::Open {
+                reopen_at: now + self.cfg.cooldown,
+            };
+        }
+    }
 }
 
 /// The `CircuitBreaker` [`Layer`] factory: holds the single shared breaker + clock.
@@ -317,6 +333,45 @@ impl<S, T> fmt::Debug for CircuitBreaker<S, T> {
     }
 }
 
+/// Arms a safety net for an admitted call: if the [`CircuitBreaker::call`] future
+/// is dropped (caller cancellation) or the inner service panics **before** the real
+/// outcome is recorded, this guard's `Drop` resolves the (possibly Half-Open) probe
+/// via [`Breaker::on_abandoned_probe`], so a cancelled probe can never strand the
+/// breaker in a permanent Half-Open reject. Disarmed the instant the inner call
+/// returns normally, so a completed call records its true outcome instead.
+struct ProbeGuard<'a, T: Timer> {
+    breaker: &'a std::sync::Mutex<Breaker>,
+    timer: &'a T,
+    armed: bool,
+}
+
+impl<'a, T: Timer> ProbeGuard<'a, T> {
+    const fn arm(breaker: &'a std::sync::Mutex<Breaker>, timer: &'a T) -> Self {
+        Self {
+            breaker,
+            timer,
+            armed: true,
+        }
+    }
+
+    const fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl<T: Timer> Drop for ProbeGuard<'_, T> {
+    fn drop(&mut self) {
+        if self.armed {
+            let now = self.timer.now();
+            let mut breaker = self
+                .breaker
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            breaker.on_abandoned_probe(now);
+        }
+    }
+}
+
 impl<S, T, B> Service<http::Request<Bytes>> for CircuitBreaker<S, T>
 where
     S: Service<http::Request<Bytes>, Response = http::Response<B>, Error = HttpError> + Sync,
@@ -345,7 +400,12 @@ where
                 return Err(HttpError::CircuitOpen); // fast reject — the leaf is not touched
             }
 
+            // Arm the drop-guard: if this future is cancelled (or the leaf panics)
+            // before the real outcome is recorded below, the guard resolves the
+            // (possibly Half-Open) probe instead of stranding the breaker.
+            let mut guard = ProbeGuard::arm(&self.breaker, &self.timer);
             let outcome = self.inner.call(req).await; // NO lock held across the await
+            guard.disarm(); // the future was NOT cancelled — record the true outcome below
 
             // Record the classified outcome under a second short lock.
             let class = classify(&outcome);
@@ -566,6 +626,77 @@ mod breaker_tests {
         );
         b.record(Class::Success, after); // 2 of 2 → close
         assert_eq!(b.admit(after), Admit::Pass, "both probes reached → closed");
+    }
+
+    #[test]
+    fn abandoned_probe_reopens_half_open() {
+        let now = Instant::now();
+        let mut b = Breaker::new(cfg(1, 1));
+        b.record(Class::Failure, now); // → Open
+        let after = now + Duration::from_secs(30);
+        assert_eq!(
+            b.admit(after),
+            Admit::Pass,
+            "cooldown elapsed → probe admitted"
+        );
+        b.on_abandoned_probe(after); // the probe's future was dropped
+        assert_eq!(
+            b.admit(after),
+            Admit::Reject,
+            "abandoned probe reopened → still within the fresh cooldown"
+        );
+        assert_eq!(
+            b.admit(after + Duration::from_secs(30)),
+            Admit::Pass,
+            "self-healed after a fresh cooldown from the abandonment"
+        );
+    }
+
+    #[test]
+    fn abandoned_probe_is_a_noop_in_closed() {
+        let now = Instant::now();
+        let mut b = Breaker::new(cfg(3, 1));
+        b.record(Class::Failure, now); // streak = 1
+        b.record(Class::Failure, now); // streak = 2
+        b.on_abandoned_probe(now); // must NOT advance the streak
+        assert_eq!(
+            b.admit(now),
+            Admit::Pass,
+            "2 real failures < threshold 3 — abandon was a no-op"
+        );
+        b.record(Class::Failure, now); // the 3rd REAL failure trips it
+        assert_eq!(b.admit(now), Admit::Reject, "3rd real failure → tripped");
+    }
+
+    #[test]
+    fn abandoned_probe_is_a_noop_in_open() {
+        let now = Instant::now();
+        let mut b = Breaker::new(cfg(1, 1));
+        b.record(Class::Failure, now); // → Open { reopen_at: now + 30s }
+        b.on_abandoned_probe(now + Duration::from_secs(5)); // must not push the deadline out
+        assert_eq!(
+            b.admit(now + Duration::from_secs(29)),
+            Admit::Reject,
+            "reopen_at unchanged by the no-op abandon"
+        );
+        assert_eq!(
+            b.admit(now + Duration::from_secs(30)),
+            Admit::Pass,
+            "original cooldown still elapses on schedule"
+        );
+    }
+
+    #[test]
+    fn record_while_open_never_untrips() {
+        let now = Instant::now();
+        let mut b = Breaker::new(cfg(1, 1));
+        b.record(Class::Failure, now); // → Open
+        b.record(Class::Success, now); // a stale success from a pre-trip admit
+        assert_eq!(
+            b.admit(now),
+            Admit::Reject,
+            "the Open no-op arm must never un-trip a freshly-opened circuit"
+        );
     }
 }
 
@@ -799,6 +930,94 @@ mod service_tests {
                 HttpError::CircuitOpen
             ),
             "clone B observes A's trip (single per-host breaker)"
+        );
+    }
+
+    // A leaf that fails on its first call (tripping `cfg(threshold=1)`) and then
+    // never resolves — models the Half-Open probe call getting cancelled in flight.
+    #[derive(Clone)]
+    struct FailThenHangLeaf {
+        calls: Arc<AtomicUsize>,
+    }
+    impl FailThenHangLeaf {
+        fn new() -> Self {
+            Self {
+                calls: Arc::new(AtomicUsize::new(0)),
+            }
+        }
+    }
+    impl Service<http::Request<Bytes>> for FailThenHangLeaf {
+        type Response = http::Response<()>;
+        type Error = HttpError;
+        #[allow(clippy::manual_async_fn)]
+        fn call(
+            &self,
+            _req: http::Request<Bytes>,
+        ) -> impl Future<Output = Result<Self::Response, HttpError>> + Send {
+            let i = self.calls.fetch_add(1, Ordering::Relaxed);
+            async move {
+                if i == 0 {
+                    Err(err_of(ErrorKind::Connection))
+                } else {
+                    // Models an in-flight request that never returns until cancelled.
+                    std::future::pending::<Result<http::Response<()>, HttpError>>().await
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn a_cancelled_half_open_probe_reopens_instead_of_wedging() {
+        let timer = MockTimer::new();
+        let leaf = FailThenHangLeaf::new();
+        let svc =
+            CircuitBreakerLayer::new(cfg(1, secs(30), secs(900), 1), timer.clone()).layer(leaf);
+
+        // 1. First call is admitted (Closed) but fails → trips the circuit Open.
+        //    The call returns the real transport error, not `CircuitOpen` — the
+        //    circuit trips only *after* this outcome is recorded.
+        assert!(matches!(
+            svc.call(bare_req()).await.unwrap_err(),
+            HttpError::Connection(_)
+        ));
+        // Confirm the trip: the very next call fast-rejects.
+        let err = svc.call(bare_req()).await.unwrap_err();
+        assert!(matches!(err, HttpError::CircuitOpen), "confirms Open");
+
+        // 2. Cooldown elapses.
+        timer.advance(secs(30));
+
+        // 3. Poll once: admits the Half-Open probe (state → HalfOpen{probes_left:0})
+        //    and parks on the never-resolving leaf call.
+        // `Box::pin` (not `std::pin::pin!`) so `drop(fut)` below actually runs the
+        // future's destructor early — `pin!`'s backing storage lives in a hidden
+        // stack slot until the enclosing scope ends, so dropping its `Pin<&mut _>`
+        // handle would NOT run `ProbeGuard::drop` at the point we need it to.
+        let mut fut = Box::pin(svc.call(bare_req()));
+        assert!(
+            futures_util::poll!(fut.as_mut()).is_pending(),
+            "the probe is admitted and parked on the hanging leaf"
+        );
+
+        // 4. Drop the parked future — simulates caller cancellation. `ProbeGuard::drop`
+        //    must fire `Breaker::on_abandoned_probe`, reopening the circuit.
+        drop(fut);
+
+        // 5. Self-heal, not a wedge: still within the fresh cooldown → fast-reject.
+        assert!(
+            matches!(
+                svc.call(bare_req()).await.unwrap_err(),
+                HttpError::CircuitOpen
+            ),
+            "reopened with a fresh cooldown from the abandonment"
+        );
+        // After a fresh cooldown, a new probe is admitted again (parks on the leaf,
+        // i.e. polls Pending) instead of being permanently rejected as CircuitOpen.
+        timer.advance(secs(30));
+        let mut fut2 = std::pin::pin!(svc.call(bare_req()));
+        assert!(
+            futures_util::poll!(fut2.as_mut()).is_pending(),
+            "self-healed: a fresh probe is admitted rather than wedged at probes_left:0"
         );
     }
 }

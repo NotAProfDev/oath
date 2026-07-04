@@ -273,6 +273,16 @@ where
   between attempts), the breaker only ever *reads* `timer.now()`; the Open→Half-Open
   transition is a **lazy comparison on the next `admit`**, so there is no background
   timer, no `futures-util::select`, and no new dependency.
+- **Cancellation-safe.** An admitted call arms an RAII `ProbeGuard` around
+  `inner.call(req).await`; if that future is **dropped** (caller cancellation via
+  `select!`/`timeout`) or the inner service **panics** before the real outcome is
+  recorded, the guard's `Drop` calls `Breaker::on_abandoned_probe` (Half-Open →
+  reopen on a fresh `cooldown`; a no-op in `Closed`/`Open`). The guard is disarmed the
+  instant `inner.call` returns normally, so a completed call still records its true
+  outcome. This closes the one wedge the "every admitted probe reaches a decisive
+  resolution" invariant (§2) didn't cover on its own: a **cancelled** Half-Open probe
+  now self-heals after `cooldown` instead of permanently stranding the breaker at
+  `probes_left: 0`.
 
 ### 5. The new error — `HttpError::CircuitOpen`
 
