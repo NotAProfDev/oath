@@ -26,5 +26,5 @@ pub use auth::{Auth, AuthSource, NoAuth, SetHeaders};
 pub use body::{BufferMode, Guarded, ResponseBody};
 pub use client::HttpClient;
 pub use error::{BoxError, HttpError};
-pub use rate::{LimitDecl, LimitPolicy, RateKey, RateLimitConfig};
+pub use rate::{BuildError, LimitDecl, LimitPolicy, RateKey, RateLimitConfig, validate_coverage};
 pub use service::Service;

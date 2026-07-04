@@ -12,6 +12,7 @@
 //! + one validator; the `RateLimit` layer that consumes it lands in Slice 1.
 
 use std::collections::HashMap;
+use std::fmt;
 use std::hash::Hash;
 
 /// An adapter's rate-limit key with a **finite universe** — the enumeration
@@ -73,9 +74,84 @@ pub struct RateLimitConfig<K> {
     pub local: HashMap<K, LimitDecl>,
 }
 
+impl LimitPolicy {
+    /// Reject non-sensical policy parameters (ADR-0034 §3 / spec: `rate == 0`,
+    /// `burst == 0`, `max == 0`).
+    fn validate(self) -> Result<(), BuildError> {
+        match self {
+            Self::TokenBucket { rate, burst } => {
+                if rate == 0 {
+                    return Err(BuildError::InvalidPolicy(format!(
+                        "token-bucket rate must be >= 1, got {rate}"
+                    )));
+                }
+                if burst == 0 {
+                    return Err(BuildError::InvalidPolicy(format!(
+                        "token-bucket burst must be >= 1, got {burst}"
+                    )));
+                }
+                Ok(())
+            },
+            Self::Concurrency { max } => {
+                if max == 0 {
+                    return Err(BuildError::InvalidPolicy(format!(
+                        "concurrency max must be >= 1, got {max}"
+                    )));
+                }
+                Ok(())
+            },
+        }
+    }
+}
+
+/// A construction-time pacing-config failure.
+///
+/// The boot-time guard that turns a missing or nonsensical bucket into a
+/// startup error instead of a live 429 (ADR-0034 §3). Non-generic: the
+/// offending key is rendered to a `String` so `stack()`/`build()` can return
+/// `Result<_, BuildError>` regardless of `K`.
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum BuildError {
+    /// A [`RateKey`] variant is not classified in `local` — the map is not
+    /// total over `K::all()`.
+    #[error(
+        "rate-limit key `{0}` is not classified in the config (every RateKey::all() variant must be declared)"
+    )]
+    UndeclaredKey(String),
+    /// A policy carries out-of-range parameters (`rate`/`burst`/`max` of 0).
+    #[error("invalid rate-limit policy: {0}")]
+    InvalidPolicy(String),
+}
+
+/// Validate that `cfg` is a **total**, param-sane pacing configuration.
+///
+/// The `global` policy is valid, and every [`RateKey`] variant is classified
+/// with a valid policy (ADR-0034 §3). Slice 2's `stack()`/`build()` call this
+/// before assembling the stack, so a coverage gap is a boot failure.
+///
+/// # Errors
+/// [`BuildError::UndeclaredKey`] if a `K::all()` variant is absent from
+/// `cfg.local`; [`BuildError::InvalidPolicy`] if the global or any local policy
+/// has an out-of-range parameter.
+pub fn validate_coverage<K>(cfg: &RateLimitConfig<K>) -> Result<(), BuildError>
+where
+    K: RateKey + fmt::Debug,
+{
+    cfg.global.validate()?;
+    for key in K::all() {
+        match cfg.local.get(key) {
+            None => return Err(BuildError::UndeclaredKey(format!("{key:?}"))),
+            Some(LimitDecl::Policy(policy)) => policy.validate()?,
+            Some(LimitDecl::GlobalOnly) => {},
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{LimitDecl, LimitPolicy, RateKey, RateLimitConfig};
+    use super::{BuildError, LimitDecl, LimitPolicy, RateKey, RateLimitConfig, validate_coverage};
     use std::collections::HashMap;
 
     /// A stand-in endpoint key for the tests — the shape an adapter provides.
@@ -135,5 +211,104 @@ mod tests {
             }
         );
         assert_eq!(cfg.local[&TestKey::History], LimitDecl::GlobalOnly);
+    }
+
+    /// A total, param-sane config over `TestKey` — the baseline the negative
+    /// tests mutate.
+    fn total_config() -> RateLimitConfig<TestKey> {
+        RateLimitConfig {
+            global: LimitPolicy::TokenBucket {
+                rate: 10,
+                burst: 20,
+            },
+            local: HashMap::from([
+                (
+                    TestKey::PlaceOrder,
+                    LimitDecl::Policy(LimitPolicy::Concurrency { max: 1 }),
+                ),
+                (
+                    TestKey::Snapshot,
+                    LimitDecl::Policy(LimitPolicy::TokenBucket { rate: 5, burst: 5 }),
+                ),
+                (TestKey::History, LimitDecl::GlobalOnly),
+            ]),
+        }
+    }
+
+    #[test]
+    fn total_config_validates() {
+        assert_eq!(validate_coverage(&total_config()), Ok(()));
+    }
+
+    #[test]
+    fn missing_key_is_undeclared() {
+        let mut cfg = total_config();
+        cfg.local.remove(&TestKey::History);
+        let err = validate_coverage(&cfg).unwrap_err();
+        assert!(matches!(err, BuildError::UndeclaredKey(ref k) if k.contains("History")));
+    }
+
+    #[test]
+    fn zero_rate_token_bucket_is_invalid() {
+        let mut cfg = total_config();
+        cfg.local.insert(
+            TestKey::Snapshot,
+            LimitDecl::Policy(LimitPolicy::TokenBucket { rate: 0, burst: 5 }),
+        );
+        assert!(matches!(
+            validate_coverage(&cfg),
+            Err(BuildError::InvalidPolicy(_))
+        ));
+    }
+
+    #[test]
+    fn zero_burst_token_bucket_is_invalid() {
+        let mut cfg = total_config();
+        cfg.local.insert(
+            TestKey::Snapshot,
+            LimitDecl::Policy(LimitPolicy::TokenBucket { rate: 5, burst: 0 }),
+        );
+        assert!(matches!(
+            validate_coverage(&cfg),
+            Err(BuildError::InvalidPolicy(_))
+        ));
+    }
+
+    #[test]
+    fn zero_concurrency_max_is_invalid() {
+        let mut cfg = total_config();
+        cfg.local.insert(
+            TestKey::PlaceOrder,
+            LimitDecl::Policy(LimitPolicy::Concurrency { max: 0 }),
+        );
+        assert!(matches!(
+            validate_coverage(&cfg),
+            Err(BuildError::InvalidPolicy(_))
+        ));
+    }
+
+    #[test]
+    fn bad_global_policy_is_invalid() {
+        let mut cfg = total_config();
+        cfg.global = LimitPolicy::TokenBucket { rate: 0, burst: 1 };
+        assert!(matches!(
+            validate_coverage(&cfg),
+            Err(BuildError::InvalidPolicy(_))
+        ));
+    }
+
+    #[test]
+    fn global_only_endpoints_need_no_local_params() {
+        // A `GlobalOnly` decl carries no policy, so it is always coverage-valid
+        // (it is paced by the already-validated global).
+        let cfg = RateLimitConfig {
+            global: LimitPolicy::Concurrency { max: 2 },
+            local: HashMap::from([
+                (TestKey::PlaceOrder, LimitDecl::GlobalOnly),
+                (TestKey::Snapshot, LimitDecl::GlobalOnly),
+                (TestKey::History, LimitDecl::GlobalOnly),
+            ]),
+        };
+        assert_eq!(validate_coverage(&cfg), Ok(()));
     }
 }
