@@ -28,6 +28,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `HttpClient` (blanket-impl'd `Service` sub-trait), `ResponseBody` (buffer-xor-
   stream, forwarding `Body` metadata), and `BufferMode`. New `oath-adapter-net-
   http-mock` test harness (`MockClient`, `MockBody`, `MockTimer`).
+- `oath-adapter-net-http-api` construction seams — `AuthSource` (per-attempt
+  credential stamping) with `NoAuth`, the `Auth` layer (innermost, so `Retry`
+  re-stamps per attempt) and `SetHeaders` (static defaults outside `Auth`,
+  dynamic wins), and `Guarded` (response body carrying an optional `async-lock`
+  concurrency permit, released at the earlier of stream-end or drop). ADR-0034
+  records the construction-surface decisions and the ADR-0030/0031 amendments.
 - `oath-adapter-net-ws-api` WebSocket contract (ADR-0032/0033) — `Frame`/`CloseFrame`
   (RFC 6455 frame vocabulary), `WsError` (one concrete transport error with
   `HasErrorKind`), the split owned halves (`WsSink` one-shot RPITIT send half with

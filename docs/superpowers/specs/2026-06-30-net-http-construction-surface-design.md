@@ -462,8 +462,9 @@ All new workspace deps go through `[workspace.dependencies]` per the repo patter
 ## Open questions (for the implementation plan)
 
 1. **ADR form** — fold the two amendments into 0030/0031 directly, or land a short
-   ADR-0032 that records them and the construction-surface decisions? (The repo has
-   landed 0029–0031 append-only; leaning ADR-0032.)
+   **ADR-0034** that records them and the construction-surface decisions? (The repo has
+   landed 0029–0031 append-only; leaning a standalone ADR. 0032/0033 are reserved by the
+   WebSocket transport pair, so this workstream's ADR is **0034**, not 0032.)
 2. **Slice boundaries** — does the construction surface land as one PR or several
    (e.g. `AuthSource` + `Auth` layer; `Guarded`/semaphore + `RateLimit`;
    `stack`/`build`/coverage; the mock crate)? A `writing-plans` concern.

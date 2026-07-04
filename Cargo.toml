@@ -60,6 +60,9 @@ oath-core-api = { path = "crates/core/api", version = "0.1.0" }
 oath-core-kernel = { path = "crates/core/kernel", version = "0.1.0" }
 
 # External shared — backend-specific deps belong in individual crate Cargo.toml files
+# Runtime-neutral concurrency semaphore (event-listener family) — carries the
+# Guarded body's concurrency permit, keeps tokio out of net-http-api (ADR-0034 §2).
+async-lock = "3"
 # Runtime-neutral last-value channel (extracted from tokio::sync::watch,
 # event-listener family) — keeps tokio out of net-ws-api (ADR-0033 §5).
 async-watch = "0.3"
