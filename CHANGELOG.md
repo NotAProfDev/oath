@@ -54,6 +54,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   TokenBucket` gains `per: Duration` for sub-1/second venue limits, and the
   ≤1-concurrency-permit invariant is a boot check (`BuildError::MultipleConcurrency`).
   (ADR-0031 §3–4.)
+- `oath-adapter-net-http-api` `Timeout` resilience layer (Slice 1 PR 2) — the
+  `Timeout<S, T>` service + `TimeoutLayer<T>` factory (`net-api::Layer`): bounds the
+  send (inner call → response) against a `net-api::Timer` deadline, returning
+  `HttpError::Timeout` when it elapses first (inner future dropped); body-transparent.
+  Adds the `RequestTimeout(Duration)` per-request override extension (absent → the
+  layer default). Response-future-only (ADR-0031 §1's "bounds the send, not the permit
+  wait"); a streaming-body timeout is deferred. No new dependency. (ADR-0031 §1,
+  ADR-0034.)
 - net-http construction-surface design refinements (ADR-0034 append-only
   Amendments 2026-07-04, spec updated) — an absent `RateLimit<K>` directive now
   **fails closed** (not "defaults to `Global`"), closing the last silent

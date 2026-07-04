@@ -12,6 +12,8 @@
 //!   `RateLimitConfig`, and the boot-time `validate_coverage` check
 //! - [`rate_limit`] — the `RateLimit` layer, its `RateLimitLayer` factory, and
 //!   the `RateScope`/`Scope` per-request directive
+//! - [`timeout`] — the `Timeout` layer, its `TimeoutLayer` factory, and the
+//!   `RequestTimeout` per-request override
 //!
 //! The resilience layers, `stack`/`build` assembly, and backends land in later
 //! slices. No async runtime, `hyper`, `reqwest`, or `serde` here.
@@ -24,6 +26,7 @@ pub mod error;
 pub mod rate;
 pub mod rate_limit;
 pub mod service;
+pub mod timeout;
 
 pub use auth::{Auth, AuthSource, NoAuth, SetHeaders};
 pub use body::{BufferMode, Guarded, ResponseBody};
@@ -35,3 +38,4 @@ pub use rate::{
 };
 pub use rate_limit::{RateLimit, RateLimitLayer, RateScope, Scope};
 pub use service::Service;
+pub use timeout::{RequestTimeout, Timeout, TimeoutLayer};
