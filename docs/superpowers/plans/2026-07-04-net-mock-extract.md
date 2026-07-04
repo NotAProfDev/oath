@@ -28,6 +28,7 @@ Every task implicitly includes these (from CLAUDE.md, the workspace `[workspace.
 - `crates/adapter/net/mock/src/lib.rs` — **new.** Crate root: `MockTimer` re-export + the `lock` poison-recovery helper.
 - `crates/adapter/net/mock/src/timer.rs` — **moved** verbatim from `crates/adapter/net/http/mock/src/timer.rs`.
 - `crates/adapter/net/http/mock/src/lib.rs` — **modify.** Drop the `timer` module + `MockTimer` re-export; update the module doc.
+- `crates/adapter/net/http/mock/Cargo.toml` — **modify.** Drop the now-unused `oath-adapter-net-api` dependency — it was used **only** by `timer.rs`, so once that file leaves, `just machete` (deny-level) fails until it is removed.
 - `Cargo.toml` (workspace) — **modify.** Add the member + the `[workspace.dependencies]` entry.
 - `CHANGELOG.md` — **modify.** `[Unreleased] → Changed`.
 - **No README change** — the crate table + mermaid graph list only the `*-api` contract crates; the existing dev-only mock crates (`net-http-mock`, `net-ws-mock`) are already absent, so `net-mock` follows that established convention.
@@ -70,7 +71,7 @@ All subsequent tasks run inside this worktree. (If it is missing, recreate it: `
 **Files:**
 - Create: `crates/adapter/net/mock/Cargo.toml`, `crates/adapter/net/mock/src/lib.rs`
 - Move: `crates/adapter/net/http/mock/src/timer.rs` → `crates/adapter/net/mock/src/timer.rs`
-- Modify: `crates/adapter/net/http/mock/src/lib.rs`, root `Cargo.toml`
+- Modify: `crates/adapter/net/http/mock/src/lib.rs`, `crates/adapter/net/http/mock/Cargo.toml`, root `Cargo.toml`
 
 **Interfaces:**
 - Consumes: `oath_adapter_net_api::Timer` (the trait `MockTimer` implements); `tokio` (dev, for the moved tests).
@@ -172,7 +173,7 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 ```
 
-(`lock` stays — `client.rs` still uses it. `tokio` + `http-body-util` dev-deps stay — `body.rs`/`client.rs` tests still use them. So `net-http-mock/Cargo.toml` is unchanged and `just machete` stays green.)
+Then edit `crates/adapter/net/http/mock/Cargo.toml` — remove `oath-adapter-net-api` from `[dependencies]`. It was used **only** by the now-moved `timer.rs`, so leaving it fails `just machete` (deny-level). (`lock` stays — `client.rs` still uses it; the `tokio` + `http-body-util` dev-deps stay — `body.rs`/`client.rs` tests still use them.)
 
 - [ ] **Step 6: Verify both crates build and test green**
 
@@ -187,7 +188,7 @@ Expected: PASS — no clippy warnings; no unused dependency (in particular `net-
 - [ ] **Step 8: Commit**
 
 ```bash
-git add crates/adapter/net/mock crates/adapter/net/http/mock/src/lib.rs Cargo.toml Cargo.lock
+git add crates/adapter/net/mock crates/adapter/net/http/mock/src/lib.rs crates/adapter/net/http/mock/Cargo.toml Cargo.toml Cargo.lock
 git commit -m "refactor(net): extract MockTimer into shared oath-adapter-net-mock crate"
 ```
 
