@@ -171,9 +171,10 @@ mod tests {
     #[test]
     fn rate_key_all_is_drift_proof() {
         // Exhaustive `match` with no wildcard arm: adding a `TestKey` variant
-        // fails to compile HERE, forcing whoever adds it to also list it in
-        // `all()`; the length assertion catches a variant added to the enum
-        // but dropped from `all()`.
+        // fails to compile HERE, forcing whoever adds it to also update
+        // `all()` by hand — that compile error is the actual drift guard.
+        // The length assertion only catches `all()` shrinking (e.g. an
+        // accidental removal), not a variant omitted from it.
         fn is_listed(k: TestKey) -> bool {
             match k {
                 TestKey::PlaceOrder | TestKey::Snapshot | TestKey::History => true,
