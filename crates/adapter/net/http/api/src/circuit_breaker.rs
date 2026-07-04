@@ -7,12 +7,12 @@
 //! response), or **immediately** on a `Throttled`/429 with the long
 //! [`CircuitBreakerConfig::throttle_cooldown`] (IBKR's ~15-minute penalty box).
 //! While Open it **fast-rejects** every request with a non-retryable
-//! [`HttpError::CircuitOpen`](crate::HttpError::CircuitOpen) — the inner stack is
+//! [`HttpError::CircuitOpen`] — the inner stack is
 //! never touched. After the cooldown a bounded number of **Half-Open** probes test
 //! recovery: a reached-host response closes the circuit, a failure re-opens it.
 //!
-//! The state machine lives in a pure, clock-injected [`Breaker`] (transitions take
-//! `now: Instant` as an input, table-tested with zero async); the [`CircuitBreaker`]
+//! The state machine lives in a pure, clock-injected `Breaker` (transitions take
+//! `now: Instant` as an input, table-tested with zero async); the `CircuitBreaker`
 //! service is a thin `Arc<Mutex<Breaker>>` + [`Timer`](oath_adapter_net_api::Timer)
 //! shell. A **single per-host** breaker is shared behind `Arc`. Runtime-neutral and
 //! `now()`-only — the breaker never sleeps (Open→Half-Open is a lazy comparison on
@@ -27,7 +27,7 @@ use std::time::Duration;
 /// The circuit breaker's thresholds, as plain `Copy` data (ADR-0031 §5).
 ///
 /// `failure_threshold` and `half_open_probes` are `NonZeroU32`: "≥ 1" is a type
-/// invariant, so [`CircuitBreakerLayer::new`](crate::CircuitBreakerLayer) needs no
+/// invariant, so `CircuitBreakerLayer::new` needs no
 /// `Result` (a `0` threshold is nonsense and `0` probes would leave a tripped
 /// circuit stuck Open forever). This types §5's `u32` sketch more precisely.
 #[derive(Debug, Clone, Copy)]
@@ -59,19 +59,24 @@ pub(crate) enum Class {
 
 /// Classify a call outcome for the breaker (ADR-0031 §5).
 ///
-/// Only genuine transport failures (`Connection`/`Timeout`) and `5xx` are
-/// `Failure`; `Throttled`/429 is `TripNow`; a `4xx`/`Auth`/unclassified error is
-/// `Ignored` (never trips **and never resets** — so an interleave cannot mask a
-/// building outage); `2xx`/`3xx` is `Success`. `Unknown → Ignored` is the
-/// conservative v1 default (the resilience4j fail-safe `Unknown → Failure` is a
-/// documented future improvement).
+/// Genuine transport failures (`Connection`/`Timeout`), the error-side `Server`
+/// kind, and `5xx` responses are all `Failure`; `Throttled`/429 is `TripNow`; a
+/// `4xx`/`Auth`/unclassified error is `Ignored` (never trips **and never
+/// resets** — so an interleave cannot mask a building outage); `2xx`/`3xx` is
+/// `Success`. `Unknown → Ignored` is the conservative v1 default (the
+/// resilience4j fail-safe `Unknown → Failure` is a documented future
+/// improvement).
 #[allow(dead_code)]
 pub(crate) fn classify<B>(outcome: &Result<http::Response<B>, HttpError>) -> Class {
     match outcome {
         Err(e) => match e.kind() {
+            // Server (5xx-equivalent error kind) grouped with transport failures —
+            // defensive: no HttpError maps here today, but keeps classify total if
+            // kind() widens.
             ErrorKind::Connection | ErrorKind::Timeout | ErrorKind::Server => Class::Failure,
             ErrorKind::Throttled => Class::TripNow,
-            // Auth, Client, Unknown, CircuitOpen — and any future kind — are Ignored.
+            // Auth, Client, Unknown, CircuitOpen — and any future kind — are Ignored
+            // (no HttpError maps to Client either today; same defensive rationale).
             _ => Class::Ignored,
         },
         Ok(resp) => {
