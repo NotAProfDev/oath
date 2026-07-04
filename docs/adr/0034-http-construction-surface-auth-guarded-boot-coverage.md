@@ -162,3 +162,15 @@ carries the full reasoning.
    `RateLimit<K>` sketch, which collided with the layer name). The
    ≤1-concurrency-permit invariant (`Guarded` holds one) is enforced at
    construction by `BuildError::MultipleConcurrency` / `validate_concurrency_singleton`.
+
+6. **`Timeout` layer (Slice 1 PR 2).** The `Timeout<S, T>` layer + `TimeoutLayer<T>`
+   factory bound the **send** (`inner.call` → response), not the pacing-permit wait
+   (ADR-0031 §1) — a response-future race against `Timer::sleep`, `HttpError::Timeout`
+   on the deadline (inner future dropped). Body-transparent: `http::Response<B>` is
+   returned untouched (no `Guarded`-style carrier, no `B: Body` bound). A per-request
+   `RequestTimeout(Duration)` extension overrides the layer default; an **absent**
+   extension uses the default (not fail-closed, unlike `RateScope` — a missing override
+   has no fail-open pacing hazard, the global deadline still applies). A `TimeoutBody`
+   bounding a *streaming* transfer's mid-stream stall is **deferred**: it is inert on
+   IBKR's all-buffered responses (a `Buffered` body is already in memory when `call`
+   returns) and lands additively when a streaming venue first needs it.
