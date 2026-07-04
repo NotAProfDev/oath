@@ -154,3 +154,11 @@ carries the full reasoning.
    on an *HTTP* mock (the nonsense edge across the crate cut). Extracting to a shared
    `net-mock` lets both stacks share one fake clock. Both mocks keep the
    production-reachability guard (`cargo tree -e no-dev -i …` → no non-dev dependents).
+
+5. **`RateLimit` layer (Slice 1 PR 1).** `LimitPolicy::TokenBucket` gains a
+   `per: Duration` so IBKR's sub-1/second limits (`1/5s`, `1/min`, `1/15min`) are
+   expressible with integer parameters; `validate_coverage` rejects a zero period.
+   The per-request directive ships as `RateScope<K>` (renamed from §3's
+   `RateLimit<K>` sketch, which collided with the layer name). The
+   ≤1-concurrency-permit invariant (`Guarded` holds one) is enforced at
+   construction by `BuildError::MultipleConcurrency` / `validate_concurrency_singleton`.
