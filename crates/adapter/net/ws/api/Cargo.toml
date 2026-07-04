@@ -1,0 +1,21 @@
+[package]
+name = "oath-adapter-net-ws-api"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+async-watch = { workspace = true }
+bytes = { workspace = true }
+http = { workspace = true }
+oath-adapter-net-api = { workspace = true }
+thiserror = { workspace = true }
+futures-core = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
+futures-util = { workspace = true }
