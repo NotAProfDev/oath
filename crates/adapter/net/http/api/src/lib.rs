@@ -36,7 +36,7 @@ pub mod timeout;
 
 pub use auth::{Auth, AuthSource, NoAuth, SetHeaders};
 pub use body::{BufferMode, Guarded, ResponseBody};
-pub use circuit_breaker::CircuitBreakerConfig;
+pub use circuit_breaker::{CircuitBreaker, CircuitBreakerConfig, CircuitBreakerLayer};
 pub use client::HttpClient;
 pub use error::{BoxError, HttpError};
 pub use rate::{

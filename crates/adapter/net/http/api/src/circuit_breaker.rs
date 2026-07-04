@@ -13,21 +13,25 @@
 //!
 //! The state machine lives in a pure, clock-injected `Breaker` (transitions take
 //! `now: Instant` as an input, table-tested with zero async); the `CircuitBreaker`
-//! service is a thin `Arc<Mutex<Breaker>>` + [`Timer`](oath_adapter_net_api::Timer)
+//! service is a thin `Arc<Mutex<Breaker>>` + [`Timer`]
 //! shell. A **single per-host** breaker is shared behind `Arc`. Runtime-neutral and
 //! `now()`-only — the breaker never sleeps (Open→Half-Open is a lazy comparison on
 //! the next admit), so there is no timer race and no new dependency. Body-transparent
 //! — `http::Response<B>` is forwarded untouched.
 
-use crate::HttpError;
-use oath_adapter_net_api::{ErrorKind, HasErrorKind};
+use crate::{HttpError, Service};
+use bytes::Bytes;
+use oath_adapter_net_api::{ErrorKind, HasErrorKind, Layer, Timer};
+use std::fmt;
+use std::future::Future;
 use std::num::NonZeroU32;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 /// The circuit breaker's thresholds, as plain `Copy` data (ADR-0031 §5).
 ///
 /// `failure_threshold` and `half_open_probes` are `NonZeroU32`: "≥ 1" is a type
-/// invariant, so `CircuitBreakerLayer::new` needs no
+/// invariant, so [`CircuitBreakerLayer::new`] needs no
 /// `Result` (a `0` threshold is nonsense and `0` probes would leave a tripped
 /// circuit stuck Open forever). This types §5's `u32` sketch more precisely.
 #[derive(Debug, Clone, Copy)]
@@ -44,7 +48,6 @@ pub struct CircuitBreakerConfig {
 
 /// The breaker-relevant classification of one call outcome (pure, state-independent).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)]
 pub(crate) enum Class {
     /// A genuine transport/server failure — advances the Closed trip counter.
     Failure,
@@ -66,7 +69,6 @@ pub(crate) enum Class {
 /// `Success`. `Unknown → Ignored` is the conservative v1 default (the
 /// resilience4j fail-safe `Unknown → Failure` is a documented future
 /// improvement).
-#[allow(dead_code)]
 pub(crate) fn classify<B>(outcome: &Result<http::Response<B>, HttpError>) -> Class {
     match outcome {
         Err(e) => match e.kind() {
@@ -97,7 +99,6 @@ pub(crate) fn classify<B>(outcome: &Result<http::Response<B>, HttpError>) -> Cla
 /// The breaker's state (ADR-0031 §5). `Instant` deadlines are compared against
 /// `Timer::now()` by the async shell — the core itself never reads a clock.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)]
 enum BreakerState {
     /// Passing requests; `consecutive_failures` counts toward the trip threshold.
     Closed { consecutive_failures: u32 },
@@ -113,7 +114,6 @@ enum BreakerState {
 
 /// The admission verdict for one call.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)]
 pub(crate) enum Admit {
     /// Admit the call to the inner stack.
     Pass,
@@ -127,13 +127,11 @@ pub(crate) enum Admit {
 /// unit is table-testable with zero async. The async `CircuitBreaker` shell owns
 /// the `Mutex` and the `Timer`; this type holds neither.
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub(crate) struct Breaker {
     state: BreakerState,
     cfg: CircuitBreakerConfig,
 }
 
-#[allow(dead_code)]
 impl Breaker {
     /// A fresh breaker starts Closed with no failures.
     pub(crate) const fn new(cfg: CircuitBreakerConfig) -> Self {
@@ -235,6 +233,131 @@ impl Breaker {
             // A stale outcome from a call admitted before a concurrent trip; drop it.
             // Never un-trips a freshly-opened circuit (single global v1 breaker).
             BreakerState::Open { .. } => {},
+        }
+    }
+}
+
+/// The `CircuitBreaker` [`Layer`] factory: holds the single shared breaker + clock.
+///
+/// `new` constructs the breaker **once** into an `Arc<Mutex<…>>`; every service it
+/// produces (and every clone) shares it — a single per-host breaker (ADR-0031 §5).
+pub struct CircuitBreakerLayer<T> {
+    breaker: Arc<Mutex<Breaker>>,
+    timer: T,
+}
+
+impl<T> CircuitBreakerLayer<T> {
+    /// Build the layer from thresholds and a [`Timer`] clock.
+    ///
+    /// **Infallible** — `NonZeroU32` makes the two counts "≥ 1" a type invariant
+    /// (contrast `RateLimitLayer::new`, which validates a config map). Not `const`:
+    /// it allocates the shared `Arc<Mutex<Breaker>>`.
+    #[must_use]
+    pub fn new(cfg: CircuitBreakerConfig, timer: T) -> Self {
+        Self {
+            breaker: Arc::new(Mutex::new(Breaker::new(cfg))),
+            timer,
+        }
+    }
+}
+
+impl<T: Clone> Clone for CircuitBreakerLayer<T> {
+    fn clone(&self) -> Self {
+        Self {
+            breaker: Arc::clone(&self.breaker),
+            timer: self.timer.clone(),
+        }
+    }
+}
+
+impl<T> fmt::Debug for CircuitBreakerLayer<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CircuitBreakerLayer")
+            .finish_non_exhaustive()
+    }
+}
+
+impl<S, T: Clone> Layer<S> for CircuitBreakerLayer<T> {
+    type Service = CircuitBreaker<S, T>;
+
+    fn layer(&self, inner: S) -> CircuitBreaker<S, T> {
+        CircuitBreaker {
+            inner,
+            breaker: Arc::clone(&self.breaker),
+            timer: self.timer.clone(),
+        }
+    }
+}
+
+/// The `CircuitBreaker` middleware: fast-rejects while Open, else forwards.
+///
+/// A thin shell over the pure `Breaker`: it locks briefly to `admit` (using
+/// `timer.now()`), releases the lock, runs `inner.call` (or returns `CircuitOpen`),
+/// then locks briefly to `record` the classified outcome. The lock is **never**
+/// held across the `await`. Body-transparent — `http::Response<B>` is forwarded.
+pub struct CircuitBreaker<S, T> {
+    inner: S,
+    breaker: Arc<Mutex<Breaker>>,
+    timer: T,
+}
+
+impl<S: Clone, T: Clone> Clone for CircuitBreaker<S, T> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+            breaker: Arc::clone(&self.breaker),
+            timer: self.timer.clone(),
+        }
+    }
+}
+
+impl<S, T> fmt::Debug for CircuitBreaker<S, T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CircuitBreaker").finish_non_exhaustive()
+    }
+}
+
+impl<S, T, B> Service<http::Request<Bytes>> for CircuitBreaker<S, T>
+where
+    S: Service<http::Request<Bytes>, Response = http::Response<B>, Error = HttpError> + Sync,
+    T: Timer,
+{
+    type Response = http::Response<B>;
+    type Error = HttpError;
+
+    // Not `async fn`: the trait requires the returned future to be `Send`.
+    #[allow(clippy::manual_async_fn)]
+    fn call(
+        &self,
+        req: http::Request<Bytes>,
+    ) -> impl Future<Output = Result<Self::Response, HttpError>> + Send {
+        async move {
+            // Admit decision under a short lock (released at the end of this block).
+            let admit = {
+                let now = self.timer.now();
+                let mut breaker = self
+                    .breaker
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                breaker.admit(now)
+            };
+            if admit == Admit::Reject {
+                return Err(HttpError::CircuitOpen); // fast reject — the leaf is not touched
+            }
+
+            let outcome = self.inner.call(req).await; // NO lock held across the await
+
+            // Record the classified outcome under a second short lock.
+            let class = classify(&outcome);
+            {
+                let now = self.timer.now();
+                let mut breaker = self
+                    .breaker
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                breaker.record(class, now);
+            }
+            outcome
         }
     }
 }
@@ -443,5 +566,239 @@ mod breaker_tests {
         );
         b.record(Class::Success, after); // 2 of 2 → close
         assert_eq!(b.admit(after), Admit::Pass, "both probes reached → closed");
+    }
+}
+
+#[cfg(test)]
+mod service_tests {
+    use super::{CircuitBreakerConfig, CircuitBreakerLayer};
+    use crate::{HttpError, Service};
+    use bytes::Bytes;
+    use oath_adapter_net_api::{ErrorKind, Layer};
+    use oath_adapter_net_mock::MockTimer;
+    use std::future::Future;
+    use std::num::NonZeroU32;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
+
+    // One scripted outcome per attempt. `Copy` so the leaf reads it by index.
+    #[derive(Clone, Copy)]
+    enum Step {
+        Err(ErrorKind),
+        Status(u16),
+    }
+
+    fn err_of(kind: ErrorKind) -> HttpError {
+        match kind {
+            ErrorKind::Timeout => HttpError::Timeout,
+            ErrorKind::Connection => HttpError::connection("reset"),
+            ErrorKind::Throttled => HttpError::Throttled,
+            ErrorKind::Auth => HttpError::auth("expired"),
+            _ => HttpError::other("boom"),
+        }
+    }
+
+    // An inline leaf yielding a scripted sequence of outcomes, counting calls. Once
+    // the script is exhausted it repeats the last step. Body is `()` — the breaker
+    // only reads `status()`, never the body. Inline (not `MockClient`) to avoid the
+    // net-http-mock -> net-http-api dev-dep cycle.
+    #[derive(Clone)]
+    struct ScriptLeaf {
+        steps: Arc<Vec<Step>>,
+        calls: Arc<AtomicUsize>,
+    }
+    impl ScriptLeaf {
+        fn new(steps: Vec<Step>) -> Self {
+            Self {
+                steps: Arc::new(steps),
+                calls: Arc::new(AtomicUsize::new(0)),
+            }
+        }
+        fn calls(&self) -> usize {
+            self.calls.load(Ordering::Relaxed)
+        }
+    }
+    impl Service<http::Request<Bytes>> for ScriptLeaf {
+        type Response = http::Response<()>;
+        type Error = HttpError;
+        #[allow(clippy::manual_async_fn)]
+        fn call(
+            &self,
+            _req: http::Request<Bytes>,
+        ) -> impl Future<Output = Result<Self::Response, HttpError>> + Send {
+            let i = self.calls.fetch_add(1, Ordering::Relaxed);
+            let step = self
+                .steps
+                .get(i)
+                .copied()
+                .unwrap_or_else(|| *self.steps.last().unwrap());
+            async move {
+                match step {
+                    Step::Err(kind) => Err(err_of(kind)),
+                    Step::Status(code) => {
+                        let mut resp = http::Response::new(());
+                        *resp.status_mut() = http::StatusCode::from_u16(code).unwrap();
+                        Ok(resp)
+                    },
+                }
+            }
+        }
+    }
+
+    fn cfg(
+        threshold: u32,
+        cooldown: Duration,
+        throttle: Duration,
+        probes: u32,
+    ) -> CircuitBreakerConfig {
+        CircuitBreakerConfig {
+            failure_threshold: NonZeroU32::new(threshold).unwrap(),
+            cooldown,
+            throttle_cooldown: throttle,
+            half_open_probes: NonZeroU32::new(probes).unwrap(),
+        }
+    }
+
+    fn secs(n: u64) -> Duration {
+        Duration::from_secs(n)
+    }
+
+    fn bare_req() -> http::Request<Bytes> {
+        http::Request::new(Bytes::new())
+    }
+
+    #[tokio::test]
+    async fn trips_after_threshold_then_fast_rejects_without_touching_the_leaf() {
+        let leaf = ScriptLeaf::new(vec![Step::Err(ErrorKind::Connection)]); // always fails
+        let svc = CircuitBreakerLayer::new(cfg(3, secs(30), secs(900), 1), MockTimer::new())
+            .layer(leaf.clone());
+        for _ in 0..3 {
+            let _ = svc.call(bare_req()).await; // 3 consecutive failures trip it
+        }
+        assert_eq!(leaf.calls(), 3);
+        let err = svc.call(bare_req()).await.unwrap_err();
+        assert!(matches!(err, HttpError::CircuitOpen));
+        assert_eq!(
+            leaf.calls(),
+            3,
+            "an open circuit fast-rejects; the leaf is untouched"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_single_429_trips_immediately_on_the_long_cooldown() {
+        let timer = MockTimer::new();
+        let leaf = ScriptLeaf::new(vec![Step::Status(429), Step::Status(200)]);
+        let svc = CircuitBreakerLayer::new(cfg(3, secs(30), secs(900), 1), timer.clone())
+            .layer(leaf.clone());
+        let resp = svc.call(bare_req()).await.expect("429 returns as Ok");
+        assert_eq!(resp.status(), http::StatusCode::TOO_MANY_REQUESTS);
+        assert!(
+            matches!(
+                svc.call(bare_req()).await.unwrap_err(),
+                HttpError::CircuitOpen
+            ),
+            "one 429 trips the circuit"
+        );
+        timer.advance(secs(30)); // the SHORT cooldown is not enough for a throttle trip
+        assert!(matches!(
+            svc.call(bare_req()).await.unwrap_err(),
+            HttpError::CircuitOpen
+        ));
+        timer.advance(secs(900)); // now past throttle_cooldown
+        let resp = svc
+            .call(bare_req())
+            .await
+            .expect("probe admitted, leaf returns 200");
+        assert_eq!(resp.status(), http::StatusCode::OK);
+        assert_eq!(
+            leaf.calls(),
+            2,
+            "one 429 + one probe; the fast-rejects never hit the leaf"
+        );
+    }
+
+    #[tokio::test]
+    async fn recovers_when_the_cooldown_probe_succeeds() {
+        let timer = MockTimer::new();
+        let leaf = ScriptLeaf::new(vec![
+            Step::Err(ErrorKind::Timeout),
+            Step::Err(ErrorKind::Timeout),
+            Step::Status(200),
+        ]);
+        let svc = CircuitBreakerLayer::new(cfg(2, secs(30), secs(900), 1), timer.clone())
+            .layer(leaf.clone());
+        let _ = svc.call(bare_req()).await; // fail 1
+        let _ = svc.call(bare_req()).await; // fail 2 → Open
+        assert!(matches!(
+            svc.call(bare_req()).await.unwrap_err(),
+            HttpError::CircuitOpen
+        ));
+        timer.advance(secs(30));
+        let ok = svc
+            .call(bare_req())
+            .await
+            .expect("probe hits the leaf → 200");
+        assert_eq!(ok.status(), http::StatusCode::OK);
+        let ok2 = svc
+            .call(bare_req())
+            .await
+            .expect("closed → next call flows");
+        assert_eq!(ok2.status(), http::StatusCode::OK);
+        assert_eq!(
+            leaf.calls(),
+            4,
+            "2 failures + 2 post-recovery sends; rejects skip the leaf"
+        );
+    }
+
+    #[tokio::test]
+    async fn reopens_when_the_cooldown_probe_fails() {
+        let timer = MockTimer::new();
+        let leaf = ScriptLeaf::new(vec![
+            Step::Err(ErrorKind::Connection),
+            Step::Err(ErrorKind::Connection),
+            Step::Status(503),
+        ]);
+        let svc = CircuitBreakerLayer::new(cfg(2, secs(30), secs(900), 1), timer.clone())
+            .layer(leaf.clone());
+        let _ = svc.call(bare_req()).await;
+        let _ = svc.call(bare_req()).await; // Open
+        assert!(matches!(
+            svc.call(bare_req()).await.unwrap_err(),
+            HttpError::CircuitOpen
+        ));
+        timer.advance(secs(30));
+        let resp = svc
+            .call(bare_req())
+            .await
+            .expect("probe returns a 503 as Ok");
+        assert_eq!(resp.status(), 503);
+        assert!(
+            matches!(
+                svc.call(bare_req()).await.unwrap_err(),
+                HttpError::CircuitOpen
+            ),
+            "the probe failed → re-opened"
+        );
+        assert_eq!(leaf.calls(), 3);
+    }
+
+    #[tokio::test]
+    async fn clones_from_one_layer_share_the_breaker() {
+        let leaf = ScriptLeaf::new(vec![Step::Err(ErrorKind::Connection)]);
+        let layer = CircuitBreakerLayer::new(cfg(2, secs(30), secs(900), 1), MockTimer::new());
+        let a = layer.layer(leaf.clone());
+        let b = a.clone(); // shares the Arc<Mutex<Breaker>>
+        let _ = a.call(bare_req()).await; // fail 1 via A
+        let _ = a.call(bare_req()).await; // fail 2 via A → Open
+        assert!(
+            matches!(
+                b.call(bare_req()).await.unwrap_err(),
+                HttpError::CircuitOpen
+            ),
+            "clone B observes A's trip (single per-host breaker)"
+        );
     }
 }
