@@ -164,6 +164,7 @@ mod tests {
     use std::collections::BTreeMap;
     use std::future::Future;
     use std::pin::Pin;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
     use std::task::{Context, Poll};
     use std::time::Duration;
@@ -346,6 +347,49 @@ mod tests {
             .unwrap()
     }
 
+    // A leaf yielding one scripted status per call; repeats the last once exhausted.
+    #[derive(Clone, Copy)]
+    enum Step {
+        Status(u16),
+    }
+    #[derive(Clone)]
+    struct ScriptLeaf {
+        steps: Arc<Vec<Step>>,
+        calls: Arc<AtomicUsize>,
+    }
+    impl ScriptLeaf {
+        fn new(steps: Vec<Step>) -> Self {
+            Self {
+                steps: Arc::new(steps),
+                calls: Arc::new(AtomicUsize::new(0)),
+            }
+        }
+    }
+    impl Service<http::Request<Bytes>> for ScriptLeaf {
+        type Response = http::Response<StubBody>;
+        type Error = HttpError;
+        fn call(
+            &self,
+            _req: http::Request<Bytes>,
+        ) -> impl Future<Output = Result<Self::Response, HttpError>> + Send {
+            let i = self.calls.fetch_add(1, Ordering::Relaxed);
+            let step = self
+                .steps
+                .get(i)
+                .copied()
+                .unwrap_or_else(|| *self.steps.last().unwrap());
+            async move {
+                match step {
+                    Step::Status(code) => {
+                        let mut resp = http::Response::new(StubBody::new(b"body"));
+                        *resp.status_mut() = http::StatusCode::from_u16(code).unwrap();
+                        Ok(resp)
+                    },
+                }
+            }
+        }
+    }
+
     #[tokio::test]
     async fn records_method_route_status_and_body_is_transparent() {
         let (store, _guard) = capture();
@@ -425,6 +469,45 @@ mod tests {
             store.span_fields.get("route").map(String::as_str),
             Some("/iserver/orders")
         );
+        drop(store);
+    }
+
+    #[tokio::test]
+    async fn retry_populates_attempt_count_and_nests_per_attempt_events() {
+        use crate::{RetryConfig, RetryLayer, Retryable};
+        use std::num::NonZeroU32;
+
+        let (store, _guard) = capture();
+        // Zero backoff → the retry loop runs inline: MockTimer `sleep(0)` is Ready,
+        // so no spawn/advance is needed to drain the backoff between attempts.
+        let cfg = RetryConfig {
+            max_attempts: NonZeroU32::new(3).unwrap(),
+            base: Duration::ZERO,
+            cap: Duration::ZERO,
+            seed: 1,
+        };
+        let leaf = ScriptLeaf::new(vec![Step::Status(503), Step::Status(200)]);
+        let svc = TracingLayer::new(MockTimer::new())
+            .layer(RetryLayer::new(cfg, MockTimer::new()).layer(leaf));
+        let mut req = get("/iserver/orders");
+        req.extensions_mut().insert(Retryable);
+
+        let resp = svc.call(req).await.expect("503 retried → 200");
+        assert_eq!(resp.status(), http::StatusCode::OK);
+
+        let store = store.lock().unwrap();
+        // The ambient record from inside Retry lands on the outer "http.request" span.
+        assert_eq!(
+            store.span_fields.get("attempts").map(String::as_str),
+            Some("2")
+        );
+        // Two sends → two nested http.attempt events (message field = "http.attempt").
+        let attempts = store
+            .events
+            .iter()
+            .filter(|e| e.get("message").map(String::as_str) == Some("http.attempt"))
+            .count();
+        assert_eq!(attempts, 2, "one http.attempt event per send");
         drop(store);
     }
 }
