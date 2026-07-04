@@ -243,11 +243,17 @@ where
             push_bucket(bucket, &mut rate, &mut conc);
         }
 
+        // A rate token spent here is not refunded if a later phase throttles;
+        // over-pacing is the safe direction (never a 429).
         for bucket in rate {
             acquire_rate(bucket, &self.timer, deadline).await?;
         }
         let mut held = None;
         for bucket in conc {
+            debug_assert!(
+                held.is_none(),
+                "validate_concurrency_singleton guarantees at most one concurrency bucket per acquire"
+            );
             held = Some(acquire_conc(bucket, &self.timer, deadline).await?);
         }
         Ok(held)
@@ -276,7 +282,8 @@ async fn acquire_rate<T: Timer>(
         state,
     } = bucket
     else {
-        return Ok(()); // not a rate bucket — nothing to do
+        // unreachable: push_bucket routes rate buckets here; fail closed if ever reached
+        return Err(HttpError::Throttled);
     };
     loop {
         let wait = {
@@ -289,6 +296,7 @@ async fn acquire_rate<T: Timer>(
                 st.tokens -= 1.0;
                 return Ok(());
             }
+            // per is validated non-zero, tokens in [0,1), refill_per_sec > 0 -> finite positive wait; no panic.
             Duration::from_secs_f64((1.0 - st.tokens) / refill_per_sec)
         }; // lock dropped here — before any await
         if timer.now() + wait > deadline {
@@ -305,7 +313,8 @@ async fn acquire_conc<T: Timer>(
     deadline: Instant,
 ) -> Result<SemaphoreGuardArc, HttpError> {
     let Bucket::Concurrency(sem) = bucket else {
-        return Err(HttpError::Throttled); // unreachable given push_bucket, but total
+        // unreachable: push_bucket routes rate buckets here; fail closed if ever reached
+        return Err(HttpError::Throttled);
     };
     let remaining = deadline.saturating_duration_since(timer.now());
     let acquire = sem.acquire_arc();
@@ -622,5 +631,35 @@ mod tests {
         let err = svc.call(req(Scope::Local, None)).await.unwrap_err();
         assert!(matches!(err, HttpError::Throttled));
         assert_eq!(leaf.calls(), 0, "must never reach the leaf");
+    }
+
+    #[tokio::test]
+    async fn sub_one_per_second_rate_admits_one_then_throttles_until_window() {
+        // 1 token per 5s, burst 1: one request passes, the next throttles until 5s elapse.
+        let mut cfg = config();
+        cfg.local.insert(
+            Key::Snapshot,
+            LimitDecl::Policy(LimitPolicy::TokenBucket {
+                rate: 1,
+                per: Duration::from_secs(5),
+                burst: 1,
+            }),
+        );
+        let timer = MockTimer::new();
+        let svc = RateLimitLayer::new(&cfg, timer.clone(), Duration::from_secs(0))
+            .expect("valid config")
+            .layer(Leaf::ok(b"ok"));
+        svc.call(req(Scope::Local, Some(Key::Snapshot)))
+            .await
+            .expect("1st admitted");
+        let err = svc
+            .call(req(Scope::Local, Some(Key::Snapshot)))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, HttpError::Throttled));
+        timer.advance(Duration::from_secs(5));
+        svc.call(req(Scope::Local, Some(Key::Snapshot)))
+            .await
+            .expect("refilled after 5s");
     }
 }

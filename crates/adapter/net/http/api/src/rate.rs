@@ -8,8 +8,11 @@
 //! explicitly classified — `LimitDecl::Policy` or `LimitDecl::GlobalOnly`,
 //! never "absent". A missing or ill-configured bucket is caught at
 //! construction ([`validate_coverage`]), so it is a boot failure rather than a
-//! first-live-order 429 → 15-minute IBKR penalty box. This module is pure data
-//! + one validator; the `RateLimit` layer that consumes it lands in Slice 1.
+//! first-live-order 429 → 15-minute IBKR penalty box.
+//!
+//! This module is pure data + its two validators (`validate_coverage`,
+//! `validate_concurrency_singleton`); the `RateLimit` layer that consumes them
+//! lives in [`crate::rate_limit`].
 
 use std::collections::HashMap;
 use std::fmt;
