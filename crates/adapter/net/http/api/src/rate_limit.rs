@@ -413,10 +413,20 @@ mod tests {
     #[derive(Clone)]
     struct Leaf {
         body: &'static [u8],
+        calls: std::sync::Arc<std::sync::atomic::AtomicUsize>,
     }
     impl Leaf {
         fn ok(body: &'static [u8]) -> Self {
-            Self { body }
+            Self {
+                body,
+                calls: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            }
+        }
+
+        /// How many times this leaf was called — asserts a fail-closed request
+        /// never reached it.
+        fn calls(&self) -> usize {
+            self.calls.load(std::sync::atomic::Ordering::Relaxed)
         }
     }
     impl Service<http::Request<Bytes>> for Leaf {
@@ -426,6 +436,8 @@ mod tests {
             &self,
             _req: http::Request<Bytes>,
         ) -> impl Future<Output = Result<Self::Response, HttpError>> + Send {
+            self.calls
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             let data = Some(Bytes::from_static(self.body));
             async move { Ok(http::Response::new(StubBody { data })) }
         }
@@ -578,5 +590,39 @@ mod tests {
         tokio::task::yield_now().await;
         drop(held);
         waiter.await.unwrap().expect("acquired after release");
+    }
+
+    // Snapshot has a local bucket; reclassify it GlobalOnly so it has NONE.
+    fn config_with_globalonly() -> RateLimitConfig<Key> {
+        let mut cfg = config();
+        cfg.local.insert(Key::Snapshot, LimitDecl::GlobalOnly); // Snapshot now has NO local bucket
+        cfg
+    }
+
+    #[tokio::test]
+    async fn local_scope_on_a_globalonly_key_fails_closed() {
+        let l = RateLimitLayer::new(
+            &config_with_globalonly(),
+            MockTimer::new(),
+            Duration::from_secs(0),
+        )
+        .expect("valid config");
+        let leaf = Leaf::ok(b"ok");
+        let svc = l.layer(leaf.clone());
+        let err = svc
+            .call(req(Scope::Local, Some(Key::Snapshot)))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, HttpError::Throttled));
+        assert_eq!(leaf.calls(), 0, "must never reach the leaf");
+    }
+
+    #[tokio::test]
+    async fn local_scope_with_no_key_fails_closed() {
+        let leaf = Leaf::ok(b"ok");
+        let svc = layer(MockTimer::new(), Duration::from_secs(0)).layer(leaf.clone());
+        let err = svc.call(req(Scope::Local, None)).await.unwrap_err();
+        assert!(matches!(err, HttpError::Throttled));
+        assert_eq!(leaf.calls(), 0, "must never reach the leaf");
     }
 }
