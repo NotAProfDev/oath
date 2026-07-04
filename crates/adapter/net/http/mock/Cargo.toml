@@ -9,7 +9,6 @@ license.workspace = true
 workspace = true
 
 [dependencies]
-oath-adapter-net-api = { workspace = true }
 oath-adapter-net-http-api = { workspace = true }
 http = { workspace = true }
 bytes = { workspace = true }

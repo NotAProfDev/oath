@@ -6,6 +6,7 @@ resolver = "3"
 members = [
   "crates/model",
   "crates/adapter/net/api",
+  "crates/adapter/net/mock",
   "crates/adapter/net/http/api",
   "crates/adapter/net/http/mock",
   "crates/adapter/net/ws/api",
@@ -44,6 +45,7 @@ categories = ["finance", "asynchronous"]
 # does not treat { workspace = true } path deps as wildcard requirements.
 oath-model = { path = "crates/model", version = "0.1.0" }
 oath-adapter-net-api = { path = "crates/adapter/net/api", version = "0.1.0" }
+oath-adapter-net-mock = { path = "crates/adapter/net/mock", version = "0.1.0" }
 oath-adapter-net-http-api = { path = "crates/adapter/net/http/api", version = "0.1.0" }
 oath-adapter-net-http-mock = { path = "crates/adapter/net/http/mock", version = "0.1.0" }
 oath-adapter-net-ws-api = { path = "crates/adapter/net/ws/api", version = "0.1.0" }
