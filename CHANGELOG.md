@@ -34,6 +34,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   dynamic wins), and `Guarded` (response body carrying an optional `async-lock`
   concurrency permit, released at the earlier of stream-end or drop). ADR-0034
   records the construction-surface decisions and the ADR-0030/0031 amendments.
+- `oath-adapter-net-http-api` boot-time pacing coverage — the `RateKey` trait
+  (finite universe via `all()`), the `LimitPolicy`/`LimitDecl` classification
+  vocabulary, the total `RateLimitConfig<K>` map, `BuildError`, and the
+  standalone `validate_coverage` check: an unclassified endpoint or an
+  out-of-range policy param is a boot failure, not a first-live-order 429
+  (ADR-0034 §3). Closes Slice 0 of the net-http construction surface.
 - net-http construction-surface design refinements (ADR-0034 append-only
   Amendments 2026-07-04, spec updated) — an absent `RateLimit<K>` directive now
   **fails closed** (not "defaults to `Global`"), closing the last silent

@@ -8,6 +8,8 @@
 //! - [`client`] — the `HttpClient` dependency-inversion seam
 //! - [`body`] — `ResponseBody`, `BufferMode`, and the permit-carrying `Guarded`
 //! - [`auth`] — the `AuthSource` seam, `NoAuth`, and the `Auth`/`SetHeaders` layers
+//! - [`rate`] — `RateKey`, the `LimitPolicy`/`LimitDecl` vocabulary, the total
+//!   `RateLimitConfig`, and the boot-time `validate_coverage` check
 //!
 //! The resilience layers, `stack`/`build` assembly, and backends land in later
 //! slices. No async runtime, `hyper`, `reqwest`, or `serde` here.
@@ -17,10 +19,12 @@ pub mod auth;
 pub mod body;
 pub mod client;
 pub mod error;
+pub mod rate;
 pub mod service;
 
 pub use auth::{Auth, AuthSource, NoAuth, SetHeaders};
 pub use body::{BufferMode, Guarded, ResponseBody};
 pub use client::HttpClient;
 pub use error::{BoxError, HttpError};
+pub use rate::{BuildError, LimitDecl, LimitPolicy, RateKey, RateLimitConfig, validate_coverage};
 pub use service::Service;
