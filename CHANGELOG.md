@@ -40,6 +40,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   standalone `validate_coverage` check: an unclassified endpoint or an
   out-of-range policy param is a boot failure, not a first-live-order 429
   (ADR-0034 §3). Closes Slice 0 of the net-http construction surface.
+- net-http construction-surface design refinements (ADR-0034 append-only
+  Amendments 2026-07-04, spec updated) — an absent `RateLimit<K>` directive now
+  **fails closed** (not "defaults to `Global`"), closing the last silent
+  under-pacing path; `Guarded` releases its permit on the earliest of terminal
+  frame, **mid-stream error**, or drop; the `async-lock` choice is re-grounded on
+  the stated multi-backend goal (a non-tokio stack stays genuinely `tokio`-free);
+  and `MockTimer` will relocate from `net-http-mock` into a shared dev-only
+  `oath-adapter-net-mock` crate so the WS resilience slice shares one fake clock.
+  Code changes land with their slices.
 - `oath-adapter-net-ws-api` WebSocket contract (ADR-0032/0033) — `Frame`/`CloseFrame`
   (RFC 6455 frame vocabulary), `WsError` (one concrete transport error with
   `HasErrorKind`), the split owned halves (`WsSink` one-shot RPITIT send half with
