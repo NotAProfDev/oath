@@ -103,13 +103,15 @@ impl SplitMix64 {
         // `ceil` comes from `backoff_ceiling` (≤ `cap`); clamp its nanos into u64
         // (a `cap` above ~584 years is not a real config — clamp, don't panic).
         let ceil_nanos = u64::try_from(ceil.as_nanos()).unwrap_or(u64::MAX);
-        if ceil_nanos == 0 {
-            return Duration::ZERO;
-        }
-        // Uniform in [0, ceil_nanos]. `saturating_add(1)` avoids a `% 0` when
-        // ceil_nanos == u64::MAX; modulo bias is irrelevant for backoff jitter.
-        let modulus = ceil_nanos.saturating_add(1);
-        Duration::from_nanos(self.next_u64() % modulus)
+        // Uniform and **inclusive** over `[0, ceil_nanos]`. `checked_add(1)` is the
+        // modulus for every representable ceiling; at the `u64::MAX` edge there is no
+        // `MAX + 1` modulus, but the bare `u64` draw already spans `[0, u64::MAX]`
+        // inclusively, so no value is lost. (`ceil_nanos == 0` → `% 1` → `ZERO`.)
+        // Modulo bias is irrelevant for backoff jitter.
+        let pick = ceil_nanos
+            .checked_add(1)
+            .map_or_else(|| self.next_u64(), |modulus| self.next_u64() % modulus);
+        Duration::from_nanos(pick)
     }
 }
 
@@ -663,6 +665,18 @@ mod rng_tests {
     fn zero_ceiling_yields_zero() {
         let rng = SplitMix64::new(7);
         assert_eq!(rng.duration_in(Duration::ZERO), Duration::ZERO);
+    }
+
+    #[test]
+    fn saturating_ceiling_does_not_panic_and_stays_inclusive() {
+        // A ceil whose nanos exceed u64::MAX clamps `ceil_nanos` to u64::MAX, hitting
+        // the inclusive-edge branch (`checked_add(1)` is `None`). It must not panic
+        // and every draw must stay within the clamped ceiling of u64::MAX nanos.
+        let rng = SplitMix64::new(123);
+        let clamped_ceil = Duration::from_nanos(u64::MAX);
+        for _ in 0..1000 {
+            assert!(rng.duration_in(Duration::MAX) <= clamped_ceil);
+        }
     }
 
     #[test]
