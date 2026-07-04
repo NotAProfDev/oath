@@ -118,13 +118,13 @@ where
         req: http::Request<Bytes>,
     ) -> impl Future<Output = Result<Self::Response, HttpError>> + Send {
         async move {
-            // Read method + path up front — path ONLY, never the query, which can
-            // carry tokens (ADR-0031 §6). `route` is owned so `req` can move on.
-            let route = req.uri().path().to_owned();
+            // Record method + path (path ONLY — never the query, which can carry
+            // tokens, ADR-0031 §6). Both borrow `req` only for the macro, so `req` is
+            // free to move into the inner call below.
             let span = tracing::info_span!(
                 "http.request",
                 method = %req.method(),
-                route = %route,
+                route = %req.uri().path(),
                 status = Empty,
                 error_kind = Empty,
                 latency_us = Empty,
@@ -315,6 +315,22 @@ mod tests {
         }
     }
 
+    // Errors with a secret embedded in the error MESSAGE, so the test catches a
+    // regression that records `?e` (the whole HttpError) instead of `?e.kind()`.
+    #[derive(Clone)]
+    struct SecretErrLeaf;
+    impl Service<http::Request<Bytes>> for SecretErrLeaf {
+        type Response = http::Response<StubBody>;
+        type Error = HttpError;
+        #[allow(clippy::manual_async_fn)]
+        fn call(
+            &self,
+            _req: http::Request<Bytes>,
+        ) -> impl Future<Output = Result<Self::Response, HttpError>> + Send {
+            async move { Err(HttpError::connection("secret=LEAK_TOKEN")) }
+        }
+    }
+
     // Advances the shared clock by `elapsed` (synchronously — MockTimer uses
     // interior mutability) before returning 200, giving the layer a deterministic
     // nonzero latency to record without spawning.
@@ -501,13 +517,53 @@ mod tests {
             store.span_fields.get("attempts").map(String::as_str),
             Some("2")
         );
-        // Two sends → two nested http.attempt events (message field = "http.attempt").
+        // The event count asserts two attempts were emitted (message field =
+        // "http.attempt"); `on_event` doesn't filter by parent span, so it can't
+        // prove nesting — the `attempts` span-field assertion above is what proves
+        // they nested under the outer span.
         let attempts = store
             .events
             .iter()
             .filter(|e| e.get("message").map(String::as_str) == Some("http.attempt"))
             .count();
         assert_eq!(attempts, 2, "one http.attempt event per send");
+        drop(store);
+    }
+
+    #[tokio::test]
+    async fn never_leaks_secret_on_the_error_or_retry_path() {
+        use crate::{RetryConfig, RetryLayer, Retryable};
+        use std::num::NonZeroU32;
+        let (store, _guard) = capture();
+        // Zero backoff → the retry loop runs inline. A Retryable, secret-bearing
+        // request through an always-Connection-erroring leaf exercises Tracing's
+        // error branch (error_kind) AND Retry's per-attempt/backoff events.
+        let cfg = RetryConfig {
+            max_attempts: NonZeroU32::new(2).unwrap(),
+            base: Duration::ZERO,
+            cap: Duration::ZERO,
+            seed: 1,
+        };
+        let svc = TracingLayer::new(MockTimer::new())
+            .layer(RetryLayer::new(cfg, MockTimer::new()).layer(SecretErrLeaf));
+        let mut req = get("/iserver/orders?token=LEAK_TOKEN");
+        req.headers_mut().insert(
+            http::header::AUTHORIZATION,
+            http::HeaderValue::from_static("Bearer LEAK_TOKEN"),
+        );
+        req.extensions_mut().insert(Retryable);
+        let err = svc.call(req).await.unwrap_err();
+        assert!(matches!(err, HttpError::Connection(_)));
+        let store = store.lock().unwrap();
+        let hay = store.haystack();
+        assert!(
+            !hay.contains("LEAK_TOKEN"),
+            "secret leaked on error/retry path:\n{hay}"
+        );
+        assert_eq!(
+            store.span_fields.get("error_kind").map(String::as_str),
+            Some("connection")
+        );
         drop(store);
     }
 }
