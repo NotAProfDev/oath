@@ -67,7 +67,7 @@ pub(crate) struct SplitMix64 {
 
 impl Clone for SplitMix64 {
     fn clone(&self) -> Self {
-        // Snapshot the current state — a cloned service continues the sequence.
+        // Snapshot the current state — a cloned generator continues the sequence.
         Self {
             state: AtomicU64::new(self.state.load(Ordering::Relaxed)),
         }
@@ -462,6 +462,21 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn max_attempts_one_sends_once_even_when_eligible_and_transient() {
+        // `attempt < max` is `1 < 1` = false, so no retry — and no backoff, so no
+        // timer advancing is needed.
+        let leaf = ScriptLeaf::new(vec![Step::Err(ErrorKind::Connection), Step::Status(200)]);
+        let svc = RetryLayer::new(
+            cfg(1, Duration::from_millis(1), Duration::from_millis(1)),
+            MockTimer::new(),
+        )
+        .layer(leaf.clone());
+        let err = svc.call(req(true)).await.unwrap_err();
+        assert!(matches!(err, HttpError::Connection(_)));
+        assert_eq!(leaf.calls(), 1, "max_attempts = 1 → exactly one send");
+    }
+
+    #[tokio::test]
     async fn eligible_transient_error_retries_then_succeeds() {
         let timer = MockTimer::new();
         let cap = Duration::from_millis(10);
@@ -573,6 +588,30 @@ mod tests {
             .expect("permit freed → 2nd attempt acquires and succeeds");
         assert_eq!(resp.status(), http::StatusCode::OK);
         assert_eq!(leaf.calls(), 2);
+    }
+
+    #[test]
+    fn backoff_ceiling_clamps_and_saturates() {
+        // attempt = 1 → ceiling == base (base <= cap).
+        assert_eq!(
+            super::backoff_ceiling(Duration::from_millis(10), Duration::from_secs(1), 1),
+            Duration::from_millis(10)
+        );
+        // Growth then clamp: base * 2^(n-1) exceeds cap → cap (100ms * 4 = 400ms > 250ms).
+        assert_eq!(
+            super::backoff_ceiling(Duration::from_millis(100), Duration::from_millis(250), 3),
+            Duration::from_millis(250)
+        );
+        // cap < base clamps to cap even at attempt 1.
+        assert_eq!(
+            super::backoff_ceiling(Duration::from_secs(5), Duration::from_secs(1), 1),
+            Duration::from_secs(1)
+        );
+        // A large attempt saturates (no overflow/panic) to cap.
+        assert_eq!(
+            super::backoff_ceiling(Duration::from_secs(1), Duration::from_secs(30), 40),
+            Duration::from_secs(30)
+        );
     }
 }
 
