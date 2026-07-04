@@ -33,5 +33,5 @@ pub use rate::{
     BuildError, LimitDecl, LimitPolicy, RateKey, RateLimitConfig, validate_concurrency_singleton,
     validate_coverage,
 };
-pub use rate_limit::{RateScope, Scope};
+pub use rate_limit::{RateLimit, RateLimitLayer, RateScope, Scope};
 pub use service::Service;
