@@ -413,16 +413,17 @@ is untouched.
      dictating the adapter's task topology (the ADR-0003 leak). A post-`shutdown` trigger is a
      harmless no-op (closed channel), not a type error.
 
-3. **`WsConfig` is validated at construction; `stack()`/`build()` stay config-infallible
-   (pins §9, which was silent on param sanity).** Two tiers. **Tier 1 — illegal states
+3. **`WsConfig` validates in its own builder; the stack factories (`stack()`/`build()`)
+   stay config-infallible (pins §9, which was silent on param sanity).** Two tiers. **Tier 1 — illegal states
    unrepresentable**: `NonZeroU32`/`NonZeroUsize` for always-on `≥ 1` fields (buffer count/bytes,
    attempt-rate cap), and **`Option`/enum for optional features so "off" is *absence*, not a
    zero**: `send_rate: Option<NonZeroU32>` (§8 default-off), `active_probe: Option<ProbeConfig>`
    (§4 knob), `max_attempts: Option<NonZeroU32>` (§7). This deletes the whole "param == 0" error
    class the HTTP `BuildError` validates at runtime — a strict improvement over the sibling
    surface. **Tier 2 — cross-field invariants** (which `NonZero` cannot encode, and `std` has no
-   `NonZeroDuration`) checked in a smart constructor / builder `build() -> Result<WsConfig,
-   WsConfigError>`: `backoff_min ≤ backoff_max` and `probe_interval < idle_threshold` (or the
+   `NonZeroDuration`) checked in `WsConfig`'s own smart constructor / builder
+   (`WsConfig::builder().build() -> Result<WsConfig, WsConfigError>` — distinct from the §9
+   stack factory `build()`): `backoff_min ≤ backoff_max` and `probe_interval < idle_threshold` (or the
    active probe is dead config — you would declare `Stale` before ever probing). The
    `~idle_threshold < connect_timeout` relation is **not** real (different lifecycle phases) and
    is not checked. `WsConfig` fields are private / `#[non_exhaustive]` so construction is the only
