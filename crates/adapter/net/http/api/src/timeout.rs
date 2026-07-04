@@ -28,7 +28,10 @@ use std::time::Duration;
 /// fail-open hazard (the global deadline still applies), so it is not rejected
 /// (contrast `RateScope`, ADR-0034 Amendment #1).
 #[derive(Debug, Clone, Copy)]
-pub struct RequestTimeout(pub Duration);
+pub struct RequestTimeout(
+    /// The deadline this request must complete within, overriding the layer default.
+    pub Duration,
+);
 
 /// The `Timeout` [`Layer`] factory: holds the default deadline + clock and
 /// produces a [`Timeout`] around any inner service.
