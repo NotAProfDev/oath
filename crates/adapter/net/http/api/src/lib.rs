@@ -40,6 +40,6 @@ pub use rate::{
     validate_coverage,
 };
 pub use rate_limit::{RateLimit, RateLimitLayer, RateScope, Scope};
-pub use retry::{RetryConfig, Retryable};
+pub use retry::{Retry, RetryConfig, RetryLayer, Retryable};
 pub use service::Service;
 pub use timeout::{RequestTimeout, Timeout, TimeoutLayer};
