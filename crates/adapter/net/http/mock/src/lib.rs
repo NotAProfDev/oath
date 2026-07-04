@@ -1,15 +1,14 @@
-//! Test harness for the net-http stack: a canned-response `MockClient` leaf, a
-//! frame-controllable `MockBody`, and a `MockTimer` virtual clock. Consumed by
-//! downstream crates via `[dev-dependencies]` only — it has no production edge.
+//! Test harness for the net-http stack: a canned-response `MockClient` leaf and
+//! a frame-controllable `MockBody`. Consumed by downstream crates via
+//! `[dev-dependencies]` only — it has no production edge. (The `MockTimer`
+//! virtual clock now lives in the transport-neutral `oath-adapter-net-mock`.)
 #![forbid(unsafe_code)]
 
 pub mod body;
 pub mod client;
-pub mod timer;
 
 pub use body::MockBody;
 pub use client::MockClient;
-pub use timer::MockTimer;
 
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
