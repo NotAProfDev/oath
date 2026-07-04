@@ -49,7 +49,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `RateLimit<S, K, T>` service + `RateLimitLayer<K, T>` factory (`net-api::Layer`):
   proactive per-endpoint pacing (token-bucket + concurrency policies) built from a
   validated `RateLimitConfig`, driven by `net-api::Timer` (mockable clock). Adds the
-  `RateScope`/`Scope` per-request directive (absent → global-paced; `None` → opt-out;
+  `RateScope`/`Scope` per-request directive (absent → fails closed; `None` → opt-out;
   a runtime coverage gap fails closed as `Throttled`, never sent). `LimitPolicy::
   TokenBucket` gains `per: Duration` for sub-1/second venue limits, and the
   ≤1-concurrency-permit invariant is a boot check (`BuildError::MultipleConcurrency`).

@@ -43,7 +43,7 @@ sent) on any coverage gap that reaches runtime.
   `async-lock`, `futures-util` for the acquire race — **no** `tokio`).
 - The frozen `RateState<K>` bucket structure built from a validated config.
 - The `RateScope<K>` per-request extension (`{ scope: Scope, key: Option<K> }`) and
-  the `Scope` enum, plus absent-extension default and fail-closed handling.
+  the `Scope` enum, plus absent-extension and coverage-gap fail-closed handling.
 - The **token-refill algorithm** and the **acquire ordering** (rate-before-concurrency,
   global-first), with `max_wait` backpressure.
 - Permit lifetime routed through the existing `Guarded<B>` (rate = ZST; concurrency =
@@ -97,8 +97,9 @@ Renamed from ADR-0031 §3's `struct RateLimit<K>` sketch to **`RateScope<K>`** s
 does not collide with the layer type also named `RateLimit`. The adapter stamps it
 when it builds each request (it knows the endpoint), replacing a classifier closure.
 
-- **Absent extension → `Global`.** You cannot bypass the account-wide budget by
-  forgetting to stamp — the default is the safe one.
+- **Absent extension → fail closed** (`Throttled`, never sent). A forgotten stamp
+  must not silently fly global-paced-only, skipping the endpoint's own local
+  limit (ADR-0034 Amendment #1); "global only" is an explicit `Scope::Global`.
 - **`None` → acquire nothing** — the *explicit* opt-out, the only unlimited path.
 - **`Global` / `Local` / `Both`** → the obvious bucket sets.
 
@@ -196,7 +197,7 @@ runtime-neutrality:
 - **Fail-closed:** a `Local`/`Both` directive for a `GlobalOnly` key, and a
   `Local`/`Both` with `key: None`, both return `Throttled`, unsent (recording
   `MockClient` sees nothing).
-- **Directive semantics:** `None` acquires nothing; absent extension is global-paced;
+- **Directive semantics:** `None` acquires nothing; absent extension fails closed;
   `Both` spends both budgets.
 - **Config amendment:** `validate_coverage` rejects `per == 0`; the new concurrency
   check rejects global-`Concurrency` + local-`Concurrency`; every IBKR row round-trips

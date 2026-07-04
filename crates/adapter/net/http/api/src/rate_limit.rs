@@ -24,9 +24,12 @@ pub enum Scope {
 /// The per-request pacing directive, carried as an `http::Request` extension.
 ///
 /// The adapter stamps it when it builds each request (it knows the endpoint).
-/// An **absent** directive defaults to [`Scope::Global`] — you cannot bypass the
-/// account-wide budget by forgetting to stamp. `Clone` so it survives the
-/// per-attempt request clone `Retry` performs (Slice 1).
+/// An **absent** directive is **rejected fail-closed** (`HttpError::Throttled`,
+/// never sent) — a forgotten stamp must not silently fly global-paced-only,
+/// skipping the endpoint's own local limit (ADR-0034 Amendment #1). "Global
+/// only" is said with an explicit [`Scope::Global`]; opt out with
+/// [`Scope::None`]. `Clone` so it survives the per-attempt request clone
+/// `Retry` performs (Slice 1).
 #[derive(Debug, Clone)]
 pub struct RateScope<K> {
     /// Which bucket sets to spend against.
@@ -332,14 +335,12 @@ where
         req: http::Request<Bytes>,
     ) -> impl Future<Output = Result<Self::Response, HttpError>> + Send {
         async move {
-            let directive = req
-                .extensions()
-                .get::<RateScope<K>>()
-                .cloned()
-                .unwrap_or(RateScope {
-                    scope: Scope::Global,
-                    key: None,
-                });
+            // Absent directive fails closed (ADR-0034 Amendment #1): a forgotten
+            // stamp must never fly unpaced or global-only, silently skipping the
+            // endpoint's own local limit. "Global only" is an explicit Scope::Global.
+            let Some(directive) = req.extensions().get::<RateScope<K>>().cloned() else {
+                return Err(HttpError::Throttled);
+            };
             let permit = self.acquire(&directive).await?;
             let resp = self.inner.call(req).await?;
             let (parts, body) = resp.into_parts();
@@ -535,20 +536,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn absent_directive_is_global_paced() {
-        let timer = MockTimer::new();
-        // global burst 10 -> 11th throttles.
-        let svc = layer(timer, Duration::from_secs(0)).layer(Leaf::ok(b"ok"));
-        for _ in 0..10 {
-            svc.call(http::Request::new(Bytes::new()))
-                .await
-                .expect("within global burst");
-        }
+    async fn absent_directive_fails_closed() {
+        // A request with no RateScope extension is rejected, never sent
+        // (ADR-0034 Amendment #1) — "global only" must be an explicit Scope::Global.
+        let leaf = Leaf::ok(b"ok");
+        let svc = layer(MockTimer::new(), Duration::from_secs(0)).layer(leaf.clone());
         let err = svc
             .call(http::Request::new(Bytes::new()))
             .await
             .unwrap_err();
         assert!(matches!(err, HttpError::Throttled)); // HttpError has no PartialEq
+        assert_eq!(leaf.calls(), 0, "absent directive must not reach the leaf");
     }
 
     #[tokio::test]
