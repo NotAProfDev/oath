@@ -802,58 +802,54 @@ git commit -m "feat(net): RateLimit layer — token-bucket + concurrency acquire
 
 **Files:**
 - Modify: `crates/adapter/net/http/api/src/rate_limit.rs`
-- Modify: `crates/adapter/net/http/api/src/lib.rs`
 
 **Interfaces:**
-- Consumes: everything from Task 3.
-- Produces: extends the `lib.rs` re-export to `pub use rate_limit::{RateLimit, RateLimitLayer, RateScope, Scope};`. The fail-closed behavior is already coded in `acquire` (Task 3, the `ok_or(HttpError::Throttled)?` lines); this task pins it with tests and exports the layer types.
+- Consumes: everything from Task 3 — the existing inline test doubles (`Leaf`, `StubBody`) and helpers (`config()`, `layer()`, `req()`, the `Key` enum), NOT `MockClient` (Task 3 established that `MockClient` forms a non-compiling dev-dep cycle, so the tests use inline doubles per the `body.rs`/`auth.rs` house pattern).
+- Produces: two fail-closed tests. **The `lib.rs` re-export `pub use rate_limit::{RateLimit, RateLimitLayer, RateScope, Scope};` already landed in Task 3** (pulled forward), so this task does NOT touch `lib.rs`. The fail-closed behavior is already coded in `acquire` (Task 3, the `ok_or(HttpError::Throttled)?` lines); this task pins it with tests.
 
-- [ ] **Step 1: Write the failing tests**
+- [ ] **Step 1: Extend the `Leaf` double to record whether it was called**
 
-Add to the `rate_limit.rs` `tests` module. These need a `GlobalOnly` key and reuse `config()`/`layer()`:
+The Task-3 `Leaf` returns a canned `http::Response<StubBody>` but does not record calls. To assert "the request never reached the leaf," add a call counter to the existing `Leaf` struct in the `tests` module: an `Arc<std::sync::atomic::AtomicUsize>` field, bumped with `fetch_add(1, Relaxed)` at the top of its `call`, a `fn calls(&self) -> usize` accessor (`load(Relaxed)`), and `#[derive(Clone)]` so a test can hold a handle to the same leaf it wrapped. Keep `Leaf::ok(...)` working (initialize the counter to zero). Mechanical extension — match the double's current field/constructor style.
+
+- [ ] **Step 2: Write the failing tests**
+
+Add to the `rate_limit.rs` `tests` module (reusing `config()`, `layer()`, `req()`, and the extended `Leaf`):
 
 ```rust
-    // Snapshot has a local bucket; add a GlobalOnly key with none.
+    // Snapshot has a local bucket; reclassify it GlobalOnly so it has NONE.
     fn config_with_globalonly() -> RateLimitConfig<Key> {
         let mut cfg = config();
-        cfg.local.insert(Key::Snapshot, LimitDecl::GlobalOnly); // now Snapshot has NO local bucket
+        cfg.local.insert(Key::Snapshot, LimitDecl::GlobalOnly); // Snapshot now has NO local bucket
         cfg
     }
 
     #[tokio::test]
     async fn local_scope_on_a_globalonly_key_fails_closed() {
-        let timer = MockTimer::new();
-        let l = RateLimitLayer::new(&config_with_globalonly(), timer, Duration::from_secs(0))
-            .expect("valid");
-        let leaf = MockClient::ok("ok");
+        let l = RateLimitLayer::new(&config_with_globalonly(), MockTimer::new(), Duration::from_secs(0))
+            .expect("valid config");
+        let leaf = Leaf::ok(b"ok");
         let svc = l.layer(leaf.clone());
         let err = svc.call(req(Scope::Local, Some(Key::Snapshot))).await.unwrap_err();
-        assert_eq!(err, HttpError::Throttled);
-        assert!(leaf.recorded_requests().is_empty(), "must never reach the leaf");
+        assert!(matches!(err, HttpError::Throttled));
+        assert_eq!(leaf.calls(), 0, "must never reach the leaf");
     }
 
     #[tokio::test]
     async fn local_scope_with_no_key_fails_closed() {
-        let leaf = MockClient::ok("ok");
+        let leaf = Leaf::ok(b"ok");
         let svc = layer(MockTimer::new(), Duration::from_secs(0)).layer(leaf.clone());
         let err = svc.call(req(Scope::Local, None)).await.unwrap_err();
-        assert_eq!(err, HttpError::Throttled);
-        assert!(leaf.recorded_requests().is_empty(), "must never reach the leaf");
+        assert!(matches!(err, HttpError::Throttled));
+        assert_eq!(leaf.calls(), 0, "must never reach the leaf");
     }
 ```
 
-- [ ] **Step 2: Run to verify they pass (behavior already coded)**
+(Adapt the `b"ok"` literal to `Leaf::ok`'s actual signature from Task 3.)
+
+- [ ] **Step 3: Run to verify they pass (behavior already coded)**
 
 Run: `cargo test -p oath-adapter-net-http-api rate_limit`
-Expected: PASS — the `ok_or(HttpError::Throttled)?` lines in `acquire` already implement this. If either test **fails**, the acquire order is wrong (leaf reached before acquire) — fix `call` so `self.acquire(...).await?` precedes `self.inner.call(...)`.
-
-- [ ] **Step 3: Export the layer types**
-
-In `lib.rs`, extend the `rate_limit` re-export:
-
-```rust
-pub use rate_limit::{RateLimit, RateLimitLayer, RateScope, Scope};
-```
+Expected: PASS — the `ok_or(HttpError::Throttled)?` lines in `acquire` already implement this. If either test **fails** because the leaf WAS called (`calls() == 1`), the acquire order is wrong — `call` must `self.acquire(...).await?` before `self.inner.call(...)`.
 
 - [ ] **Step 4: Full-crate check**
 
@@ -863,8 +859,8 @@ Expected: PASS, warning-free.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add crates/adapter/net/http/api/src/rate_limit.rs crates/adapter/net/http/api/src/lib.rs
-git commit -m "test(net): RateLimit fail-closed coverage gaps + export layer types"
+git add crates/adapter/net/http/api/src/rate_limit.rs
+git commit -m "test(net): RateLimit fail-closed coverage-gap tests"
 ```
 
 ---
