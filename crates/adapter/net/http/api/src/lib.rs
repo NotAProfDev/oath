@@ -38,4 +38,4 @@ pub use rate::{
 };
 pub use rate_limit::{RateLimit, RateLimitLayer, RateScope, Scope};
 pub use service::Service;
-pub use timeout::RequestTimeout;
+pub use timeout::{RequestTimeout, Timeout, TimeoutLayer};
