@@ -12,6 +12,8 @@
 //!   `RateLimitConfig`, and the boot-time `validate_coverage` check
 //! - [`rate_limit`] — the `RateLimit` layer, its `RateLimitLayer` factory, and
 //!   the `RateScope`/`Scope` per-request directive
+//! - [`retry`] — the `Retry` layer, its `RetryLayer` factory, and the
+//!   `Retryable`/`RetryConfig` retry directive + schedule
 //! - [`timeout`] — the `Timeout` layer, its `TimeoutLayer` factory, and the
 //!   `RequestTimeout` per-request override
 //!
@@ -25,6 +27,7 @@ pub mod client;
 pub mod error;
 pub mod rate;
 pub mod rate_limit;
+pub mod retry;
 pub mod service;
 pub mod timeout;
 
@@ -37,5 +40,6 @@ pub use rate::{
     validate_coverage,
 };
 pub use rate_limit::{RateLimit, RateLimitLayer, RateScope, Scope};
+pub use retry::{RetryConfig, Retryable};
 pub use service::Service;
 pub use timeout::{RequestTimeout, Timeout, TimeoutLayer};
