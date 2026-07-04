@@ -104,8 +104,18 @@ pin_project_lite::pin_project! {
 
 impl<B> Guarded<B> {
     /// Wrap `inner`, optionally carrying a concurrency `permit`.
+    ///
+    /// If `inner` is already ended (`is_end_stream()` is `true`), the permit is
+    /// released immediately: stream-end is *now*, so holding it would waste a
+    /// concurrency slot. A consumer is allowed to observe `is_end_stream()` and
+    /// never call `poll_frame` (per `http-body`), so the eager release in
+    /// `poll_frame` cannot be relied on for an already-ended body.
     #[must_use]
-    pub const fn new(inner: B, permit: Option<SemaphoreGuardArc>) -> Self {
+    pub fn new(inner: B, permit: Option<SemaphoreGuardArc>) -> Self
+    where
+        B: Body,
+    {
+        let permit = if inner.is_end_stream() { None } else { permit };
         Self { inner, permit }
     }
 }
@@ -129,7 +139,7 @@ where
     // `significant_drop_tightening` correctly flags the deliberately-held guard in the
     // `pin_project!` projection: the borrowed `permit: &mut Option<SemaphoreGuardArc>`
     // field must stay alive until the terminal frame. The lint's drop-sooner fix is wrong here —
-    // the permit must live until `*this.permit = None` at stream-end.
+    // the permit must live until `*this.permit = None` at stream termination.
     #[expect(
         clippy::significant_drop_tightening,
         reason = "permit is deliberately held until the terminal frame, then released via `*this.permit = None`; the lint's drop-sooner fix is wrong here"
@@ -140,10 +150,11 @@ where
     ) -> Poll<Option<Result<Frame<Bytes>, HttpError>>> {
         let this = self.project();
         let frame = ready!(this.inner.poll_frame(cx));
-        if frame.is_none() {
-            // Eager release at stream-end: a fully-read but still-held body
-            // must not keep hold of one of the venue's concurrency slots.
-            // Dropping the guard is synchronous and runtime-free.
+        if !matches!(frame, Some(Ok(_))) {
+            // Eager release at stream termination — the terminal `None` frame
+            // *or* an error frame (after which the body is not polled again).
+            // A still-held body must not keep one of the venue's concurrency
+            // slots; dropping the guard is synchronous and runtime-free.
             *this.permit = None;
         }
         Poll::Ready(frame)
@@ -330,6 +341,82 @@ mod tests {
         assert!(
             sem.try_acquire_arc().is_some(),
             "permit released on early drop"
+        );
+    }
+
+    #[test]
+    fn permit_releases_when_body_is_already_ended_at_construction() {
+        // A consumer may observe `is_end_stream()` and never poll (legal per
+        // `http-body`), so the eager release must happen at construction for an
+        // already-ended body — not wait for a `poll_frame` that never comes.
+        let sem = Arc::new(Semaphore::new(1));
+        let permit = sem.try_acquire_arc().expect("permit free at start");
+        let _body = Guarded::new(Frames::new([]), Some(permit));
+        assert!(
+            sem.try_acquire_arc().is_some(),
+            "permit released for an already-ended body, without polling"
+        );
+    }
+
+    /// Yields one error frame, then ends. `is_end_stream()` is `false` until the
+    /// error is emitted, so `Guarded::new` keeps the permit and the release is
+    /// exercised through `poll_frame`.
+    struct ErrorThenEnd {
+        emitted: bool,
+    }
+
+    impl Body for ErrorThenEnd {
+        type Data = Bytes;
+        type Error = HttpError;
+
+        fn poll_frame(
+            self: Pin<&mut Self>,
+            _: &mut Context<'_>,
+        ) -> Poll<Option<Result<Frame<Bytes>, HttpError>>> {
+            let this = self.get_mut();
+            if this.emitted {
+                Poll::Ready(None)
+            } else {
+                this.emitted = true;
+                Poll::Ready(Some(Err(HttpError::other("boom"))))
+            }
+        }
+
+        fn is_end_stream(&self) -> bool {
+            self.emitted
+        }
+
+        fn size_hint(&self) -> SizeHint {
+            SizeHint::default()
+        }
+    }
+
+    #[expect(
+        clippy::significant_drop_tightening,
+        reason = "the body holds the guard across assertions to prove release on the error frame while still alive"
+    )]
+    #[test]
+    fn permit_releases_on_error_frame_before_drop() {
+        // An error frame practically ends the stream (the body is not polled
+        // again), so the permit must release then — not linger until `Drop`.
+        let sem = Arc::new(Semaphore::new(1));
+        let permit = sem.try_acquire_arc().expect("permit free at start");
+        let body = Guarded::new(ErrorThenEnd { emitted: false }, Some(permit));
+        assert!(
+            sem.try_acquire_arc().is_none(),
+            "permit held before the error"
+        );
+
+        let mut cx = Context::from_waker(Waker::noop());
+        let mut body = pin!(body);
+        assert!(matches!(
+            body.as_mut().poll_frame(&mut cx),
+            Poll::Ready(Some(Err(_)))
+        ));
+        // `body` is still alive — release was eager on the error, not drop-driven.
+        assert!(
+            sem.try_acquire_arc().is_some(),
+            "permit released on the error frame"
         );
     }
 }
