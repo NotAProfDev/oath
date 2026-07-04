@@ -34,6 +34,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   dynamic wins), and `Guarded` (response body carrying an optional `async-lock`
   concurrency permit, released at the earlier of stream-end or drop). ADR-0034
   records the construction-surface decisions and the ADR-0030/0031 amendments.
+- net-http construction-surface design refinements (ADR-0034 append-only
+  Amendments 2026-07-04, spec updated) — an absent `RateLimit<K>` directive now
+  **fails closed** (not "defaults to `Global`"), closing the last silent
+  under-pacing path; `Guarded` releases its permit on the earliest of terminal
+  frame, **mid-stream error**, or drop; the `async-lock` choice is re-grounded on
+  the stated multi-backend goal (a non-tokio stack stays genuinely `tokio`-free);
+  and `MockTimer` will relocate from `net-http-mock` into a shared dev-only
+  `oath-adapter-net-mock` crate so the WS resilience slice shares one fake clock.
+  Code changes land with their slices.
 - `oath-adapter-net-ws-api` WebSocket contract (ADR-0032/0033) — `Frame`/`CloseFrame`
   (RFC 6455 frame vocabulary), `WsError` (one concrete transport error with
   `HasErrorKind`), the split owned halves (`WsSink` one-shot RPITIT send half with
