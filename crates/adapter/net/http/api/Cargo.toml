@@ -11,12 +11,14 @@ async-lock = { workspace = true }
 thiserror = { workspace = true }
 http = { workspace = true }
 bytes = { workspace = true }
+futures-util = { workspace = true }
 http-body = { workspace = true }
 http-body-util = { workspace = true }
 pin-project-lite = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }
+oath-adapter-net-mock = { workspace = true }
 
 [lints]
 workspace = true

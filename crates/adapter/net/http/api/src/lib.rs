@@ -10,6 +10,8 @@
 //! - [`auth`] — the `AuthSource` seam, `NoAuth`, and the `Auth`/`SetHeaders` layers
 //! - [`rate`] — `RateKey`, the `LimitPolicy`/`LimitDecl` vocabulary, the total
 //!   `RateLimitConfig`, and the boot-time `validate_coverage` check
+//! - [`rate_limit`] — the `RateLimit` layer, its `RateLimitLayer` factory, and
+//!   the `RateScope`/`Scope` per-request directive
 //!
 //! The resilience layers, `stack`/`build` assembly, and backends land in later
 //! slices. No async runtime, `hyper`, `reqwest`, or `serde` here.
@@ -20,11 +22,16 @@ pub mod body;
 pub mod client;
 pub mod error;
 pub mod rate;
+pub mod rate_limit;
 pub mod service;
 
 pub use auth::{Auth, AuthSource, NoAuth, SetHeaders};
 pub use body::{BufferMode, Guarded, ResponseBody};
 pub use client::HttpClient;
 pub use error::{BoxError, HttpError};
-pub use rate::{BuildError, LimitDecl, LimitPolicy, RateKey, RateLimitConfig, validate_coverage};
+pub use rate::{
+    BuildError, LimitDecl, LimitPolicy, RateKey, RateLimitConfig, validate_concurrency_singleton,
+    validate_coverage,
+};
+pub use rate_limit::{RateLimit, RateLimitLayer, RateScope, Scope};
 pub use service::Service;

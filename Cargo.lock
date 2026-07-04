@@ -288,10 +288,12 @@ version = "0.1.0"
 dependencies = [
  "async-lock",
  "bytes",
+ "futures-util",
  "http",
  "http-body",
  "http-body-util",
  "oath-adapter-net-api",
+ "oath-adapter-net-mock",
  "pin-project-lite",
  "thiserror",
  "tokio",

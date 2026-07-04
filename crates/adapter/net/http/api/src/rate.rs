@@ -8,12 +8,16 @@
 //! explicitly classified — `LimitDecl::Policy` or `LimitDecl::GlobalOnly`,
 //! never "absent". A missing or ill-configured bucket is caught at
 //! construction ([`validate_coverage`]), so it is a boot failure rather than a
-//! first-live-order 429 → 15-minute IBKR penalty box. This module is pure data
-//! + one validator; the `RateLimit` layer that consumes it lands in Slice 1.
+//! first-live-order 429 → 15-minute IBKR penalty box.
+//!
+//! This module is pure data + its two validators (`validate_coverage`,
+//! `validate_concurrency_singleton`); the `RateLimit` layer that consumes them
+//! lives in [`crate::rate_limit`].
 
 use std::collections::HashMap;
 use std::fmt;
 use std::hash::Hash;
+use std::time::Duration;
 
 /// An adapter's rate-limit key with a **finite universe** — the enumeration
 /// that makes the boot-time coverage check possible (ADR-0034 §3).
@@ -35,10 +39,14 @@ pub trait RateKey: Hash + Eq + Clone + Send + Sync + 'static {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum LimitPolicy {
-    /// A refilling token bucket: `rate` tokens/second, up to `burst` in hand.
+    /// A refilling token bucket: `rate` tokens per `per` window, up to `burst`
+    /// in hand. `per` lets sub-1/second venue limits (IBKR `1/5s`, `1/min`,
+    /// `1/15min`) be expressed exactly with integer parameters.
     TokenBucket {
-        /// Steady-state tokens per second (must be `>= 1`).
+        /// Tokens replenished per `per` window (must be `>= 1`).
         rate: u32,
+        /// The replenishment window (must be non-zero).
+        per: Duration,
         /// Maximum tokens available at once (must be `>= 1`).
         burst: u32,
     },
@@ -79,7 +87,7 @@ impl LimitPolicy {
     /// `burst == 0`, `max == 0`).
     fn validate(self) -> Result<(), BuildError> {
         match self {
-            Self::TokenBucket { rate, burst } => {
+            Self::TokenBucket { rate, per, burst } => {
                 if rate == 0 {
                     return Err(BuildError::InvalidPolicy(format!(
                         "token-bucket rate must be >= 1, got {rate}"
@@ -88,6 +96,11 @@ impl LimitPolicy {
                 if burst == 0 {
                     return Err(BuildError::InvalidPolicy(format!(
                         "token-bucket burst must be >= 1, got {burst}"
+                    )));
+                }
+                if per.is_zero() {
+                    return Err(BuildError::InvalidPolicy(format!(
+                        "token-bucket period must be non-zero, got {per:?}"
                     )));
                 }
                 Ok(())
@@ -122,6 +135,14 @@ pub enum BuildError {
     /// A policy carries out-of-range parameters (`rate`/`burst`/`max` of 0).
     #[error("invalid rate-limit policy: {0}")]
     InvalidPolicy(String),
+    /// A config in which a `Both`-scoped request could require two held
+    /// concurrency permits (global `Concurrency` **and** a local `Concurrency`)
+    /// — [`Guarded`](crate::Guarded) holds one, so this is a boot failure, not a
+    /// silent runtime permit truncation.
+    #[error(
+        "config has both a global and a local Concurrency policy; a Both-scoped request would need two held permits (Guarded holds one)"
+    )]
+    MultipleConcurrency,
 }
 
 /// Validate that `cfg` is a **total**, param-sane pacing configuration.
@@ -149,10 +170,37 @@ where
     Ok(())
 }
 
+/// Reject a config whose `Both`-scoped requests could require two held
+/// concurrency permits — global `Concurrency` **and** any local `Concurrency`.
+///
+/// `RateLimitLayer::new` calls this alongside [`validate_coverage`], turning the
+/// ≤1-concurrency-permit invariant into a boot failure (spec Decision 6).
+///
+/// # Errors
+/// [`BuildError::MultipleConcurrency`] if the global policy is `Concurrency` and
+/// any local `Policy` is also `Concurrency`.
+pub fn validate_concurrency_singleton<K>(cfg: &RateLimitConfig<K>) -> Result<(), BuildError>
+where
+    K: RateKey,
+{
+    if matches!(cfg.global, LimitPolicy::Concurrency { .. }) {
+        for decl in cfg.local.values() {
+            if matches!(decl, LimitDecl::Policy(LimitPolicy::Concurrency { .. })) {
+                return Err(BuildError::MultipleConcurrency);
+            }
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{BuildError, LimitDecl, LimitPolicy, RateKey, RateLimitConfig, validate_coverage};
+    use super::{
+        BuildError, LimitDecl, LimitPolicy, RateKey, RateLimitConfig,
+        validate_concurrency_singleton, validate_coverage,
+    };
     use std::collections::HashMap;
+    use std::time::Duration;
 
     /// A stand-in endpoint key for the tests — the shape an adapter provides.
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -189,6 +237,7 @@ mod tests {
         let cfg = RateLimitConfig {
             global: LimitPolicy::TokenBucket {
                 rate: 10,
+                per: Duration::from_secs(1),
                 burst: 20,
             },
             local: HashMap::from([
@@ -198,7 +247,11 @@ mod tests {
                 ),
                 (
                     TestKey::Snapshot,
-                    LimitDecl::Policy(LimitPolicy::TokenBucket { rate: 5, burst: 5 }),
+                    LimitDecl::Policy(LimitPolicy::TokenBucket {
+                        rate: 5,
+                        per: Duration::from_secs(1),
+                        burst: 5,
+                    }),
                 ),
                 (TestKey::History, LimitDecl::GlobalOnly),
             ]),
@@ -208,6 +261,7 @@ mod tests {
             cfg.global,
             LimitPolicy::TokenBucket {
                 rate: 10,
+                per: Duration::from_secs(1),
                 burst: 20
             }
         );
@@ -220,6 +274,7 @@ mod tests {
         RateLimitConfig {
             global: LimitPolicy::TokenBucket {
                 rate: 10,
+                per: Duration::from_secs(1),
                 burst: 20,
             },
             local: HashMap::from([
@@ -229,7 +284,11 @@ mod tests {
                 ),
                 (
                     TestKey::Snapshot,
-                    LimitDecl::Policy(LimitPolicy::TokenBucket { rate: 5, burst: 5 }),
+                    LimitDecl::Policy(LimitPolicy::TokenBucket {
+                        rate: 5,
+                        per: Duration::from_secs(1),
+                        burst: 5,
+                    }),
                 ),
                 (TestKey::History, LimitDecl::GlobalOnly),
             ]),
@@ -254,7 +313,11 @@ mod tests {
         let mut cfg = total_config();
         cfg.local.insert(
             TestKey::Snapshot,
-            LimitDecl::Policy(LimitPolicy::TokenBucket { rate: 0, burst: 5 }),
+            LimitDecl::Policy(LimitPolicy::TokenBucket {
+                rate: 0,
+                per: Duration::from_secs(1),
+                burst: 5,
+            }),
         );
         assert!(matches!(
             validate_coverage(&cfg),
@@ -267,7 +330,28 @@ mod tests {
         let mut cfg = total_config();
         cfg.local.insert(
             TestKey::Snapshot,
-            LimitDecl::Policy(LimitPolicy::TokenBucket { rate: 5, burst: 0 }),
+            LimitDecl::Policy(LimitPolicy::TokenBucket {
+                rate: 5,
+                per: Duration::from_secs(1),
+                burst: 0,
+            }),
+        );
+        assert!(matches!(
+            validate_coverage(&cfg),
+            Err(BuildError::InvalidPolicy(_))
+        ));
+    }
+
+    #[test]
+    fn zero_period_token_bucket_is_invalid() {
+        let mut cfg = total_config();
+        cfg.local.insert(
+            TestKey::Snapshot,
+            LimitDecl::Policy(LimitPolicy::TokenBucket {
+                rate: 5,
+                per: Duration::ZERO,
+                burst: 5,
+            }),
         );
         assert!(matches!(
             validate_coverage(&cfg),
@@ -291,11 +375,59 @@ mod tests {
     #[test]
     fn bad_global_policy_is_invalid() {
         let mut cfg = total_config();
-        cfg.global = LimitPolicy::TokenBucket { rate: 0, burst: 1 };
+        cfg.global = LimitPolicy::TokenBucket {
+            rate: 0,
+            per: Duration::from_secs(1),
+            burst: 1,
+        };
         assert!(matches!(
             validate_coverage(&cfg),
             Err(BuildError::InvalidPolicy(_))
         ));
+    }
+
+    #[test]
+    fn token_bucket_carries_a_period_for_sub_1_per_second_rates() {
+        // IBKR orders = 1 per 5s — inexpressible as tokens/second under u32.
+        let p = LimitPolicy::TokenBucket {
+            rate: 1,
+            per: Duration::from_secs(5),
+            burst: 1,
+        };
+        assert!(matches!(
+            p,
+            LimitPolicy::TokenBucket {
+                rate: 1,
+                burst: 1,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn global_and_local_concurrency_is_rejected() {
+        // Both-scoped request would need two held permits; Guarded holds one.
+        let cfg = RateLimitConfig {
+            global: LimitPolicy::Concurrency { max: 5 },
+            local: HashMap::from([
+                (
+                    TestKey::PlaceOrder,
+                    LimitDecl::Policy(LimitPolicy::Concurrency { max: 1 }),
+                ),
+                (TestKey::Snapshot, LimitDecl::GlobalOnly),
+                (TestKey::History, LimitDecl::GlobalOnly),
+            ]),
+        };
+        assert_eq!(
+            validate_concurrency_singleton(&cfg),
+            Err(BuildError::MultipleConcurrency)
+        );
+    }
+
+    #[test]
+    fn global_rate_with_local_concurrency_is_allowed() {
+        // The real IBKR shape: global 10/s rate + /history concurrency.
+        assert_eq!(validate_concurrency_singleton(&total_config()), Ok(()));
     }
 
     #[test]

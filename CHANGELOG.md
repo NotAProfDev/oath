@@ -45,6 +45,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   standalone `validate_coverage` check: an unclassified endpoint or an
   out-of-range policy param is a boot failure, not a first-live-order 429
   (ADR-0034 §3). Closes Slice 0 of the net-http construction surface.
+- `oath-adapter-net-http-api` `RateLimit` resilience layer (Slice 1) — the
+  `RateLimit<S, K, T>` service + `RateLimitLayer<K, T>` factory (`net-api::Layer`):
+  proactive per-endpoint pacing (token-bucket + concurrency policies) built from a
+  validated `RateLimitConfig`, driven by `net-api::Timer` (mockable clock). Adds the
+  `RateScope`/`Scope` per-request directive (absent → fails closed; `None` → opt-out;
+  a runtime coverage gap fails closed as `Throttled`, never sent). `LimitPolicy::
+  TokenBucket` gains `per: Duration` for sub-1/second venue limits, and the
+  ≤1-concurrency-permit invariant is a boot check (`BuildError::MultipleConcurrency`).
+  (ADR-0031 §3–4.)
 - net-http construction-surface design refinements (ADR-0034 append-only
   Amendments 2026-07-04, spec updated) — an absent `RateLimit<K>` directive now
   **fails closed** (not "defaults to `Global`"), closing the last silent
