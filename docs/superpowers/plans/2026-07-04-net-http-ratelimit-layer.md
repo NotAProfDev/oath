@@ -45,7 +45,7 @@ gh issue create \
   --body "Slice 1 PR 1 of the net-http resilience layers (spec: docs/superpowers/specs/2026-07-04-net-http-ratelimit-layer-design.md; ADR-0031 §3-4).
 
 - \`RateLimit<S, K, T>\` + \`RateLimitLayer<K, T>\` (impl \`net-api::Layer\`): proactive pacing so the stack never hits IBKR's 429 penalty box
-- \`RateScope<K>\`/\`Scope\` per-request directive; absent -> Global; None -> opt-out; runtime coverage gap -> fail-closed \`Throttled\`
+- \`RateScope<K>\`/\`Scope\` per-request directive; absent -> fails closed; None -> opt-out; runtime coverage gap -> fail-closed \`Throttled\`
 - \`LimitPolicy::TokenBucket\` gains \`per: Duration\` so IBKR sub-1/s limits are expressible; \`BuildError::MultipleConcurrency\` boot check (<=1 concurrency permit per request)"
 ```
 
@@ -918,7 +918,7 @@ gh pr create \
 Slice 1 **PR 1** of the net-http resilience layers (spec: docs/superpowers/specs/2026-07-04-net-http-ratelimit-layer-design.md; ADR-0031 §3-4).
 
 - **\`RateLimit<S, K, T>\`** + **\`RateLimitLayer<K, T>\`** (\`net-api::Layer\`) — proactive pacing so the stack never hits IBKR's 429 penalty box. Rate tokens acquired before concurrency permits (no-starvation), lock released before every await, a single \`max_wait\` deadline bounds the whole acquire.
-- **\`RateScope<K>\`/\`Scope\`** per-request directive — absent → \`Global\`; \`None\` → explicit opt-out; a runtime coverage gap (\`Local\`/\`Both\` on a bucketless key, or a missing key) fails **closed** as \`Throttled\`, never sent.
+- **\`RateScope<K>\`/\`Scope\`** per-request directive — absent → fails **closed** (\`Throttled\`, never sent; ADR-0034 Amend #1); \`None\` → explicit opt-out; a \`Local\`/\`Both\` directive on a bucketless or keyless request also fails closed.
 - Always returns \`http::Response<Guarded<B>>\` — a concurrency permit rides the body to stream-end/drop.
 - **\`LimitPolicy::TokenBucket\`** gains **\`per: Duration\`** so IBKR's \`1/5s\`/\`1/min\`/\`1/15min\` are expressible; **\`BuildError::MultipleConcurrency\`** enforces the ≤1-concurrency-permit invariant at boot.
 
@@ -938,7 +938,8 @@ Expected: PR open, GitHub Actions CI green (same `just ci` + MSRV job).
 **Spec coverage (design doc §Scope + Decisions):**
 - `RateLimit<S, K, T>` + `RateLimitLayer<K, T>` (`Layer`) — Task 3. ✅
 - `RateState<K>` frozen bucket map, per-bucket `Mutex`/`Semaphore` — Task 3. ✅
-- `RateScope<K>` + `Scope`, absent→`Global`, `None`→nothing — Tasks 2, 3. ✅
+- `RateScope<K>` + `Scope`, absent→fail-closed (ADR-0034 Amend #1), `None`→nothing — Tasks 2, 3. ✅
+- Test coverage note: a sub-1/second runtime pacing test (`rate:1, per:5s`) is added in the final hygiene pass. The explicit acquire-order / no-starvation runtime test is **deferred**: the order is coded and statically verified (final review), and a deterministic MockTimer-driven no-starvation assertion needs fragile multi-task scheduling — tracked for a follow-up rather than shipped flaky.
 - Fail-closed on runtime coverage gap — Task 3 (coded) + Task 4 (tests). ✅
 - Acquire order rate-before-concurrency, global-first, lock-released-before-await, single `max_wait` deadline — Task 3 (`acquire`/`acquire_rate`/`acquire_conc`). ✅
 - Token refill `min(burst, tokens + elapsed × rate/per)` — Task 3 (`acquire_rate`). ✅
