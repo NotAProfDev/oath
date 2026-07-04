@@ -8,6 +8,8 @@ members = [
   "crates/adapter/net/api",
   "crates/adapter/net/http/api",
   "crates/adapter/net/http/mock",
+  "crates/adapter/net/ws/api",
+  "crates/adapter/net/ws/mock",
   "crates/bus/api",
   "crates/event-log/api",
   "crates/persistence/api",
@@ -44,6 +46,8 @@ oath-model = { path = "crates/model", version = "0.1.0" }
 oath-adapter-net-api = { path = "crates/adapter/net/api", version = "0.1.0" }
 oath-adapter-net-http-api = { path = "crates/adapter/net/http/api", version = "0.1.0" }
 oath-adapter-net-http-mock = { path = "crates/adapter/net/http/mock", version = "0.1.0" }
+oath-adapter-net-ws-api = { path = "crates/adapter/net/ws/api", version = "0.1.0" }
+oath-adapter-net-ws-mock = { path = "crates/adapter/net/ws/mock", version = "0.1.0" }
 oath-bus-api = { path = "crates/bus/api", version = "0.1.0" }
 oath-event-log-api = { path = "crates/event-log/api", version = "0.1.0" }
 oath-persistence-api = { path = "crates/persistence/api", version = "0.1.0" }
@@ -56,7 +60,12 @@ oath-core-api = { path = "crates/core/api", version = "0.1.0" }
 oath-core-kernel = { path = "crates/core/kernel", version = "0.1.0" }
 
 # External shared — backend-specific deps belong in individual crate Cargo.toml files
+# Runtime-neutral concurrency semaphore (event-listener family) — carries the
+# Guarded body's concurrency permit, keeps tokio out of net-http-api (ADR-0034 §2).
 async-lock = "3"
+# Runtime-neutral last-value channel (extracted from tokio::sync::watch,
+# event-listener family) — keeps tokio out of net-ws-api (ADR-0033 §5).
+async-watch = "0.3"
 bytes = "1"
 http = "1"
 http-body = "1"
@@ -64,6 +73,7 @@ http-body-util = "0.1"
 pin-project-lite = "0.2"
 futures-core = { version = "0.3", default-features = false }
 futures-sink = { version = "0.3", default-features = false }
+futures-util = "0.3"
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
 tokio = { version = "1", features = ["full"] }

@@ -1,0 +1,20 @@
+[package]
+name = "oath-adapter-net-ws-mock"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+oath-adapter-net-ws-api = { workspace = true }
+http = { workspace = true }
+futures-core = { workspace = true }
+
+[dev-dependencies]
+oath-adapter-net-api = { workspace = true }
+bytes = { workspace = true }
+tokio = { workspace = true }
+futures-util = { workspace = true }

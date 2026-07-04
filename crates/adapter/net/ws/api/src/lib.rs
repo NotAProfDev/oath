@@ -1,0 +1,34 @@
+//! `oath-adapter-net-ws-api` — the WebSocket transport contract over the kernel.
+//!
+//! Builds on `oath-adapter-net-api` (composition machinery + `ErrorKind` +
+//! `Timer`). Defines the WS transport contract (ADR-0032, as amended by
+//! ADR-0033 §5): an untyped duplex frame channel — the transport moves frames
+//! and knows nothing of venue grammar (subscriptions, topics, JSON), which
+//! stays in the adapter (ADR-0003).
+//!
+//! - [`frame`] — the `Frame`/`CloseFrame` transport vocabulary
+//! - [`error`] — `WsError` and its `HasErrorKind` impl
+//! - [`sink`] — `WsSink`, the owned send half
+//! - [`source`] — `WsSource`, the owned recv half
+//! - [`lifecycle`] — the out-of-band `Lifecycle` watch channel
+//! - [`connector`] — `WsConnector`, the composition seam (handshake in, three
+//!   handles out)
+//!
+//! The resilience stack (reconnect actor, heartbeat, buffer, `stack()`) and
+//! the tungstenite backend land in later slices. No async runtime, `tokio`,
+//! `tokio-tungstenite`, or `serde` here.
+#![forbid(unsafe_code)]
+
+pub mod connector;
+pub mod error;
+pub mod frame;
+pub mod lifecycle;
+pub mod sink;
+pub mod source;
+
+pub use connector::WsConnector;
+pub use error::{BoxError, WsError};
+pub use frame::{CloseFrame, Frame};
+pub use lifecycle::{ConnState, Lifecycle, LifecycleSender, LifecycleSnapshot};
+pub use sink::WsSink;
+pub use source::WsSource;
