@@ -360,3 +360,136 @@ for a must-maintain feed. Feeds the lifecycle channel to **ADR-0004** (risk) and
 (compile-time `impl` seams, no `dyn`). Glossary unchanged — `Spawn`, `ReconnectingConnector`,
 `ReconnectingConnection`, `WsControl`, `LifecycleSnapshot` are implementation vocabulary; [CONTEXT.md](../../CONTEXT.md) is
 domain-only, and IBKR/Binance/Coinbase values are reference data for the adapters.
+
+## Amendments (2026-07-04)
+
+Refinements from a follow-up design review, recorded append-only (the decision text above
+is not edited). Each pins a construction-surface detail the decision named but left open, or
+corrects a claim the landed contract crate (`net-ws-api`, PRs #65/#66) contradicts. Each lands
+with its implementation slice. All terms remain implementation vocabulary — the domain glossary
+is untouched.
+
+1. **The `Spawn` seam is return-free and mirrors `Timer`; shutdown is cooperative (fixes §2's
+   "minimal `Spawn` seam").** §2 named the seam without a signature. It is one method, no
+   returned handle, and — like `Timer`
+   ([net-api `timer.rs`](../../crates/adapter/net/api/src/timer.rs)) — **no `'static` on the
+   trait** (`Clone + Send + Sync`); the `+ 'static` is added at the `stack()` capture site, the
+   same treatment every seam moved into the actor gets. The spawned *future* keeps `+ Send +
+   'static`.
+
+   ```rust
+   pub trait Spawn: Clone + Send + Sync {
+       fn spawn(&self, fut: impl Future<Output = ()> + Send + 'static);
+   }
+   ```
+
+   Shutdown is **cooperative, never `abort`-from-outside**: the decisive reason is graceful
+   close. `WsSink::close(self)`
+   ([`net-ws-api` `sink.rs`](../../crates/adapter/net/ws/api/src/sink.rs)) is a by-value
+   consuming terminal — the RFC 6455 closing handshake — and an aborted actor (dropped mid-poll)
+   structurally cannot invoke it, so `abort` yields an abrupt close (a secondary ban-risk on
+   venues that penalise repeated disconnects). A `MockSpawn` step-executor can then assert the
+   teardown *sequence* (Close sent → terminal snapshot flushed → future `Ready`), which `abort`
+   erases. `Spawn` object-safety is irrelevant (compile-time seam, ADR-0007); `MockSpawn` boxes
+   internally and asserts single-spawn (§2: only the reconnect actor spawns).
+
+2. **`WsControl` splits into a single-owner terminal handle and a cloneable `ReconnectTrigger`
+   (pins §1/§8's `WsControl { force_reconnect, shutdown }` — silent on `Clone`/`self`).** The
+   two verbs have genuinely different holder-models, and one Rust type cannot serve both:
+   `shutdown(self)` consuming (terminal, exclusive) and `force_reconnect(&self)` reachable from a
+   `'static` spawned task are in hard conflict — `Arc<WsControl>` enables the borrow but forbids
+   the move-out `shutdown(self)` needs. So:
+
+   - **`WsControl` — single-owner, `shutdown(self)`**, terminal and consuming (the `close(self)`
+     discipline one layer up), **awaitable-confirmed** via an actor-owned completion oneshot: the
+     actor attempts `close()` best-effort under a **bounded shutdown timeout**, then fires
+     completion *unconditionally*, so a dead socket cannot wedge `shutdown().await`. Single-owner
+     also enforces the correct ordering — orderly teardown (flatten orders → close socket) is a
+     supervisor/adapter sequence (ADR-0009), not a signal handler reaching into one transport.
+   - **`ReconnectTrigger: Clone`** (a coalescing `event-listener::Event`, no new dep) carries
+     `force_reconnect(&self)` — fire-and-forget, result observed via the `Lifecycle` watch's
+     `Resumed{epoch}`. §8 makes `force_reconnect` background-driven (proactive 24h/JWT ticks;
+     reactive staleness escalation), so it must be reachable from spawned tasks without
+     dictating the adapter's task topology (the ADR-0003 leak). A post-`shutdown` trigger is a
+     harmless no-op (closed channel), not a type error.
+
+3. **`WsConfig` validates in its own builder; the stack factories (`stack()`/`build()`)
+   stay config-infallible (pins §9, which was silent on param sanity).** Two tiers. **Tier 1 — illegal states
+   unrepresentable**: `NonZeroU32`/`NonZeroUsize` for always-on `≥ 1` fields (buffer count/bytes,
+   attempt-rate cap), and **`Option`/enum for optional features so "off" is *absence*, not a
+   zero**: `send_rate: Option<NonZeroU32>` (§8 default-off), `active_probe: Option<ProbeConfig>`
+   (§4 knob), `max_attempts: Option<NonZeroU32>` (§7). This deletes the whole "param == 0" error
+   class the HTTP `BuildError` validates at runtime — a strict improvement over the sibling
+   surface. **Tier 2 — cross-field invariants** (which `NonZero` cannot encode, and `std` has no
+   `NonZeroDuration`) checked in `WsConfig`'s own smart constructor / builder
+   (`WsConfig::builder().build() -> Result<WsConfig, WsConfigError>` — distinct from the §9
+   stack factory `build()`): `backoff_min ≤ backoff_max` and `probe_interval < idle_threshold` (or the
+   active probe is dead config — you would declare `Stale` before ever probing). The
+   `~idle_threshold < connect_timeout` relation is **not** real (different lifecycle phases) and
+   is not checked. `WsConfig` fields are private / `#[non_exhaustive]` so construction is the only
+   validation path; a builder is warranted given ~5 `Duration` fields. `stack()` keeps its §9
+   signature (`-> impl ReconnectingConnector`, no `Result`): WS has no `K`, no coverage check,
+   and no build-time config error — the fullest form of §9's "genuine reduction versus the
+   net-http surface." `WsConfigError` is the `BuildError` analogue minus `UndeclaredKey`.
+
+4. **Failure classification is a `Classify` seam over `&WsError`; `DefaultClassify` catches only
+   `Auth` (corrects §7's permanent-cases parenthetical).** Classification is behaviour, not
+   config data, so it is a compile-time seam param on `stack()`/`build()` alongside
+   `Timer`/`AuthSource`/`Spawn` — **not** a `WsConfig` field (a `Box<dyn Fn>` there would break
+   both §9's non-generic-data rule and ADR-0007's dyn-free rule). It takes **`&WsError`, not
+   `ErrorKind`**, because the landed taxonomy
+   ([`net-ws-api` `error.rs`](../../crates/adapter/net/ws/api/src/error.rs)) deliberately collapses
+   `Closed(_) → ErrorKind::Connection`, discarding the close code the hook exists to inspect.
+
+   ```rust
+   trait Classify { fn classify(&self, e: &WsError) -> Failure; }   // Failure { Transient, Permanent }
+   ```
+
+   `DefaultClassify` is a ZST **passed explicitly** (function type-param defaults are not elidable
+   at the call site); adapters refine by **delegation** (`_ => DefaultClassify.classify(e)`), no
+   `refine(e, default)` shape needed. **Correction to §7:** its parenthetical "*Permanent
+   (`ErrorKind::Auth`, protocol-version rejection)*" overstates the default — protocol-version
+   rejection is `Connection`-kinded (`error.rs` documents `Connection` as "DNS, TCP, TLS, WS
+   handshake or protocol") → `Transient`, so **only `Auth → Permanent` is default-catchable**; a
+   venue with permanent close codes (a 1008-class policy reject) that omits the hook will
+   reconnect-storm into the ban §7 warns about. That is the concrete reason the hook is
+   per-adapter, not optional for every venue.
+
+5. **Voluntary `max_attempts` exhaustion is an orthogonal `LifecycleSnapshot` field, not a
+   `ConnState` variant (resolves §7's deferred "own terminal outcome").** §7 wants the voluntary
+   give-up "distinct from `Unrecoverable`" and "a different axis." Model it as the different axis
+   it is: `phase` carries **health** (`Unrecoverable` stays involuntary-permanent-only); a new
+   sticky, level `exhausted: bool` on `LifecycleSnapshot` carries **policy**. At voluntary
+   exhaustion the `phase` holds the last health state (`Reconnecting`), **terminal-ness comes from
+   the channel close** (`LifecycleSender` dropped → `changed()` → `false`), and `exhausted = true`
+   names the cause — three signals, three axes, no overload of `Unrecoverable`. `LifecycleSnapshot`
+   gains `#[non_exhaustive]` (post-release insurance), which forces its `net-ws-mock` construction
+   onto named constructors (`stale()`/`reconnecting()`/`resumed(epoch)`/`unrecoverable()` + an
+   `exhausted` setter) rather than struct literals.
+
+6. **The §5 lossy edge feed is `tracing` events, not a second channel — under a non-blocking
+   subscriber (resolves §5's deferred delivery form).** The ordered transition trail the safety
+   `watch` coalesces away is emitted as `tracing` events off the actor, on a **distinct `target`**,
+   nesting inside the §3 outermost reconnect span — "ordered, lossy, off the actor" is exactly
+   `tracing`'s semantics, and it adds nothing beyond what the §3 `Tracing` layer already pays for
+   (`tracing` is not yet in `net-ws-api`'s manifest; that layer brings it). A dedicated
+   `async-broadcast` handle is rejected (YAGNI — the only transition-history consumer, the
+   ADR-0017 frontend, reads via the ADR-0014 Telemetry plane, not a direct WS handle).
+   **Constraint, recorded so it is not silently delegated to Telemetry config:** the subscriber
+   consuming the actor's transition target must be **non-blocking** (async offload / sampling /
+   non-blocking writer). §5 rejected a transition *stream* precisely so a slow consumer cannot
+   stall the socket-owning actor; routing through `tracing` relocates that coupling into the
+   subscriber, and it bites under the flap-storm burst §5 was designed for — a blocking subscriber
+   would reintroduce the exact stall.
+
+7. **`MockSpawn` lives in `net-ws-mock`; `MockTimer` stays single-homed in `net-mock`,
+   un-re-exported (applies amendment ADR-0034 §4's rule to §9).** `Spawn` is WS-only (§2 — no
+   HTTP layer spawns), so its mock belongs in the WS mock crate; putting it in the shared
+   `net-mock` would be the inverse of the "nonsense across the crate cut" ADR-0034 amendment 4
+   forbids. `MockTimer` (mocking the *shared* `net-api::Timer`) stays in `net-mock`; WS resilience
+   tests dev-depend both. **No re-export** — it would mint a second import path
+   (`net_ws_mock::MockTimer`) for a deliberately single-homed type to save one dev-dep line, and a
+   test drives both mocks test-side (`timer.advance(d); spawn.step();`) with no shared state. When
+   `MockSpawn` lands, correct `net-ws-mock`'s stale header
+   ([`lib.rs`](../../crates/adapter/net/ws/mock/src/lib.rs)) to claim only `MockSpawn` and point
+   at `net-mock` for the clock.

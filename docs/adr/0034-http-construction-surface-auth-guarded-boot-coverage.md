@@ -174,3 +174,32 @@ carries the full reasoning.
    bounding a *streaming* transfer's mid-stream stall is **deferred**: it is inert on
    IBKR's all-buffered responses (a `Buffered` body is already in memory when `call`
    returns) and lands additively when a streaming venue first needs it.
+
+7. **`AuthSource` is two same-shaped per-transport traits, not one "identical",
+   `Parts`-based trait (corrects 0032 §8, confirms §1's shipped shape).** ADR-0032 §8
+   and its Consequences describe `AuthSource` as an "identical one-method trait" that
+   "operates on `http::request::Parts` … so the same shape serves HTTP's
+   `Request<Bytes>` and the WS `Request<()>`." That overclaims on three axes, and the
+   shipped HTTP trait (PR #66, `crates/adapter/net/http/api/src/auth.rs`) already
+   abandoned `Parts` — correctly:
+   - **Whole request, not `Parts`.** Some HTTP schemes **sign the request body**
+     (Binance signed REST HMAC-SHA256s the payload — the Binance/Coinbase generality
+     ADR-0033 deliberately cross-checks against). A `Parts`-only `authorize`
+     structurally cannot see the body to sign it, so HTTP takes the whole
+     `&mut http::Request<Bytes>`. The WS *upgrade* is a bodyless GET, so WS takes
+     `&mut http::Request<()>` — body-agnostic **there** because there is no body, not
+     because auth is universally body-agnostic. So `Parts` is under-general, not a
+     unifier.
+   - **Different error type — so not "identical".** HTTP `authorize` returns
+     `Result<(), HttpError>`; the WS trait returns `Result<(), WsError>` (each
+     transport's own error). "Identical" cannot hold across two body types **and** two
+     error types.
+   - **Resolution:** two same-*shaped* per-transport traits — `net-http-api`:
+     `authorize(&mut http::Request<Bytes>) -> Result<(), HttpError>` (shipped, §1
+     unchanged); `net-ws-api`: `authorize(&mut http::Request<()>) -> Result<(), WsError>`
+     — each `Clone + Send + Sync`, re-stamped per attempt (HTTP) / per (re)connect (WS,
+     0032 §8). IBKR's single `IbkrAuthSource` (header/cookie, body-agnostic) impls both;
+     a body-signing venue impls only the HTTP one. **Rejected:** the `Parts` unification
+     (under-general — cannot body-sign) and a generic shared `AuthSource<B>` (reintroduces
+     the shared `net-auth-api` crate 0032 §8 itself rejected). Lands with the WS
+     `AuthSource` declaration in the WS auth slice; the HTTP trait needs no change.
