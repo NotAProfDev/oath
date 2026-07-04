@@ -16,6 +16,8 @@
 //!   `Retryable`/`RetryConfig` retry directive + schedule
 //! - [`timeout`] — the `Timeout` layer, its `TimeoutLayer` factory, and the
 //!   `RequestTimeout` per-request override
+//! - [`trace`] — the `Tracing` layer and its `TracingLayer` factory (outermost;
+//!   one span per request, secret-safe, routed to the ADR-0014 Telemetry plane)
 //!
 //! The resilience layers, `stack`/`build` assembly, and backends land in later
 //! slices. No async runtime, `hyper`, `reqwest`, or `serde` here.
@@ -30,6 +32,7 @@ pub mod rate_limit;
 pub mod retry;
 pub mod service;
 pub mod timeout;
+pub mod trace;
 
 pub use auth::{Auth, AuthSource, NoAuth, SetHeaders};
 pub use body::{BufferMode, Guarded, ResponseBody};
@@ -43,3 +46,4 @@ pub use rate_limit::{RateLimit, RateLimitLayer, RateScope, Scope};
 pub use retry::{Retry, RetryConfig, RetryLayer, Retryable};
 pub use service::Service;
 pub use timeout::{RequestTimeout, Timeout, TimeoutLayer};
+pub use trace::{Tracing, TracingLayer};
