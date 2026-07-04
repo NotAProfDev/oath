@@ -642,7 +642,7 @@ impl Breaker {
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `just check && cargo test -p oath-adapter-net-http-api circuit_breaker && just lint`
+Run: `just check && cargo test -p oath-adapter-net-http-api circuit_breaker && just lint && just doc`
 Expected: PASS, warning-free.
 
 > Known risks:
@@ -650,6 +650,7 @@ Expected: PASS, warning-free.
 > - **`probes - 1` / `successes_needed - 1`** never underflow: `admit` only enters the `probes - 1` branch with `probes = half_open_probes.get() ≥ 1`, and the `successes_needed - 1` branch is guarded by `successes_needed <= 1 → close` (so the `else` has `successes_needed ≥ 2`). If clippy `arithmetic_side_effects` (nursery) flags them, they are provably safe; prefer a clarifying comment over `saturating_sub` (which would hide a logic bug).
 > - **`consecutive_failures.saturating_add(1)`** guards the degenerate `failure_threshold = u32::MAX` case with no panic.
 > - `Breaker`/`BreakerState`/`Admit` are `pub(crate)` — no `missing_docs`/`missing_debug_implementations` obligation, but they carry docs + `Debug` anyway.
+> - **`#[allow(dead_code)]` on the new pure items.** Like Task 2's `Class`/`classify`, the lib target sees `Breaker`/`BreakerState`/`Admit` and their methods as unused (they are consumed only by `breaker_tests` and by Task 4's Service), so `just lint`'s `--all-targets` scope fails with `dead_code`. Add `#[allow(dead_code)]` where needed to keep `just lint` green; Task 4 deletes them all once the Service references them in non-test code.
 
 - [ ] **Step 5: Commit**
 
@@ -1021,7 +1022,7 @@ pub use circuit_breaker::{CircuitBreaker, CircuitBreakerConfig, CircuitBreakerLa
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `just check && cargo test -p oath-adapter-net-http-api circuit_breaker && just lint`
+Run: `just check && cargo test -p oath-adapter-net-http-api circuit_breaker && just lint && just doc`
 Expected: PASS, warning-free.
 
 > Known risks:
@@ -1030,6 +1031,8 @@ Expected: PASS, warning-free.
 > - **The `Mutex` guard must not cross the `await`** — each `lock()` is confined to its own `{ … }` block that ends before `inner.call(req).await` (admit block) or contains no await (record block). If clippy `await_holding_lock` fires, a guard escaped its block — re-scope it.
 > - **`CircuitBreakerLayer::new` is intentionally not `const`** (it calls `Arc::new`). If clippy `missing_const_for_fn` flags it, that is a false positive here — leave it non-`const`.
 > - The tests need **no** `spawn`/`yield`/`drain` (contrast `retry.rs`): the breaker never sleeps, so every `svc.call(...).await` resolves synchronously against the leaf; `MockTimer::advance` only moves `now()` for the lazy Open→Half-Open check between calls.
+> - **Remove the transitional `#[allow(dead_code)]` allows.** Task 2 put `#[allow(dead_code)]` on `Class`/`classify` and Task 3 put them on `Breaker`/`BreakerState`/`Admit` (and their methods) because the lib target saw them as unused. This task's Service wires `classify`, `Breaker::{new, admit, record}`, `Class`, and `Admit` into non-test code, so those items are now reachable — **delete every `#[allow(dead_code)]`** from `circuit_breaker.rs` and confirm `just lint` stays green (an `allow` of a now-non-firing lint is untidy, though `allow` — unlike `expect` — does not itself warn). Optionally upgrade the module-doc `` `Breaker` ``/`` `CircuitBreaker` `` and the `CircuitBreakerConfig`-doc `` `CircuitBreakerLayer::new` `` from plain code spans to intra-doc links now that the targets exist — then re-run `just doc`.
+> - **Run `just doc`** before committing — the module doc links resolve only once these types exist; net-http layer PRs have repeatedly shipped broken rustdoc links that `check`/`lint`/`test` miss.
 
 - [ ] **Step 5: Commit**
 
