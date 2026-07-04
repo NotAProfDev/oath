@@ -203,3 +203,19 @@ carries the full reasoning.
      (under-general — cannot body-sign) and a generic shared `AuthSource<B>` (reintroduces
      the shared `net-auth-api` crate 0032 §8 itself rejected). Lands with the WS
      `AuthSource` declaration in the WS auth slice; the HTTP trait needs no change.
+
+8. **`Retry` layer (Slice 1 PR 3).** The `Retry<S, T>` layer + `RetryLayer<T>`
+   factory re-issue an **explicitly-eligible** request — a `Retryable` marker
+   extension; **absent → never retried**, tightening §2's idempotent-*method*
+   default into fail-safe adapter-stamped opt-in (the same structural-safety move
+   Amendment #1 made for `RateScope`; a forgotten stamp never duplicates a `POST`)
+   — on a **transient** failure (`HttpError::{Timeout, Connection}`) or a `5xx`
+   response, with capped-exponential **full-jitter** backoff
+   (`delay ∈ [0, min(cap, base·2ⁿ⁻¹)]`) up to `RetryConfig::max_attempts`. A **429**
+   / other 4xx, an `Auth`/`Throttled` error, or an `Other` error is **never**
+   retried (ADR-0031 §2/§5); on exhaustion the **last** outcome is returned
+   verbatim (no synthesized error). Body-transparent — it drops a superseded
+   response, releasing that response's `Guarded` permit. Jitter uses an internal
+   seeded `SplitMix64` (no `rand` dependency, no injected `Jitter` generic — the
+   RNG is a pure computation); a **total-elapsed retry budget** and **`Retry-After`
+   parsing** are deferred (each an additive follow-up). No new dependency.

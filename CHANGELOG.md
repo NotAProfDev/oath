@@ -62,6 +62,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   layer default). Response-future-only (ADR-0031 §1's "bounds the send, not the permit
   wait"); a streaming-body timeout is deferred. No new dependency. (ADR-0031 §1,
   ADR-0034.)
+- `oath-adapter-net-http-api` `Retry` resilience layer (Slice 1 PR 3) — the
+  `Retry<S, T>` service + `RetryLayer<T>` factory (`net-api::Layer`): re-issues an
+  explicitly-eligible request (a `Retryable` marker extension; absent → never retried,
+  fail-safe) on a transient failure (`HttpError::{Timeout, Connection}`) or a `5xx`
+  response, with capped-exponential full-jitter backoff up to `max_attempts`. Never
+  retries a 429 / other 4xx / `Auth` / `Throttled`; returns the last outcome verbatim on
+  exhaustion; body-transparent (drops a superseded response, releasing its `Guarded`
+  permit). Adds the `Retryable` marker + `RetryConfig` schedule; jitter via an internal
+  seeded `SplitMix64` — no new dependency. (ADR-0031 §2, ADR-0034.)
 - net-http construction-surface design refinements (ADR-0034 append-only
   Amendments 2026-07-04, spec updated) — an absent `RateLimit<K>` directive now
   **fails closed** (not "defaults to `Global`"), closing the last silent
