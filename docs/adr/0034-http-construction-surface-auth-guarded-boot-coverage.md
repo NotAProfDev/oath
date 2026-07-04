@@ -107,3 +107,50 @@ response continues downstream unchanged.
 - Implementation lands in slices: `AuthSource`/`Auth`/`SetHeaders`/`Guarded` first;
   `RateKey`/`RateLimitConfig`/`BuildError` next; the resilience layers and
   `stack()`/`build()` + the hyper leaf in later slices.
+
+## Amendments (2026-07-04)
+
+Refinements from a follow-up design review, recorded append-only (the decision text
+above is not edited). Each lands with its implementation slice; the
+[construction-surface spec](../superpowers/specs/2026-06-30-net-http-construction-surface-design.md)
+carries the full reasoning.
+
+1. **Absent `RateLimit<K>` directive fails closed (tightens §3 / 0031 §3).** With
+   config-side totality (§3) in place, 0031's "absent directive defaults to `Global`"
+   was the one remaining *silent* under-pacing path: an adapter that adds an endpoint
+   and forgets to stamp the directive would fly global-paced only, invisible to the
+   boot check because the gap is in the request, not the config. So a request with
+   **no** `RateLimit<K>` extension is now **rejected fail-closed** (the same
+   non-retryable classification error as the missing-bucket backstop). "Global only"
+   is said with an explicit `Scope::Global`; opt-out with `Scope::None`. Lands with
+   the `RateLimit` slice.
+
+2. **`Guarded` releases the permit on a mid-stream error too (refines §2).** §2's
+   eager release fires on the clean terminal frame (`None`); it now *also* fires on a
+   mid-stream `Some(Err(_))` — a connection reset during a `/history` transfer is as
+   over as a clean end (http-body 1.x yields no further frames after an error), and a
+   consumer holding the errored body for error context must not pin one of `/history`'s
+   5 permits. Release rule: **the earliest of terminal frame, mid-stream error, or
+   drop.** Touches the `Guarded` body shipped in PR #66; lands as a follow-up code
+   change.
+
+3. **The `async-lock` choice rests on the stated multi-backend goal (sharpens §2's
+   rationale).** OATH intends non-tokio backends (smol/async-std) — a stated goal, not
+   a hedge — which decides `async-lock` (option R) over `tokio` `features=["sync"]`
+   (option P) on a concrete basis, not a "thin margin": under P a future *smol* stack
+   would drag `tokio` into its graph purely for the semaphore; under R the whole smol
+   stack is genuinely `tokio`-free. Option Q (a `Timer`-style semaphore trait) is
+   unnecessary, not merely YAGNI — `async_lock::Semaphore` is already cross-runtime, so
+   backends reuse the same layer semaphore; nothing to abstract.
+
+4. **`MockTimer` is *relocated* into its own dev-only `oath-adapter-net-mock` crate**
+   (`crates/adapter/net/mock`), beside the `Timer` contract in `net-api` — *not* left
+   in `net-http-mock`, which keeps only `MockClient`. `MockTimer` already ships in
+   `net-http-mock` (`crates/adapter/net/http/mock/src/timer.rs`, PR #66); this moves
+   it and re-points the http-stack tests. **Time-critical:** the WS resilience slice
+   (ADR-0033 §9) is imminent and `net-ws-mock`'s own header already says
+   "`MockTimer`/`MockSpawn` arrive with the resilience slice" — without the
+   relocation that slice must either duplicate `MockTimer` or dev-depend a *WS* mock
+   on an *HTTP* mock (the nonsense edge across the crate cut). Extracting to a shared
+   `net-mock` lets both stacks share one fake clock. Both mocks keep the
+   production-reachability guard (`cargo tree -e no-dev -i …` → no non-dev dependents).
