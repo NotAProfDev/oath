@@ -13,7 +13,7 @@ use hyper_rustls::HttpsConnector;
 use hyper_util::client::legacy::Client;
 use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::rt::{TokioExecutor, TokioTimer as HyperPoolTimer};
-use oath_adapter_net_http_api::{HttpError, ResponseBody, Service};
+use oath_adapter_net_http_api::{BufferMode, HttpError, ResponseBody, Service};
 use std::future::Future;
 use std::time::Duration;
 
@@ -61,12 +61,27 @@ impl Service<http::Request<Bytes>> for HyperLeaf {
     ) -> impl Future<Output = Result<Self::Response, HttpError>> + Send {
         let client = self.client.clone();
         async move {
+            // ADR-0030 §4: absent extension ⇒ Stream. `BufferMode` is `Copy`.
+            let mode = req
+                .extensions()
+                .get::<BufferMode>()
+                .copied()
+                .unwrap_or(BufferMode::Stream);
             let (parts, body) = req.into_parts();
             let req = http::Request::from_parts(parts, Full::new(body));
             let resp = client.request(req).await.map_err(map_legacy_err)?;
             let (parts, incoming) = resp.into_parts();
-            let mapper: fn(hyper::Error) -> HttpError = map_hyper_err;
-            let body = ResponseBody::streaming(incoming.map_err(mapper));
+            let body = match mode {
+                BufferMode::Stream => {
+                    let mapper: fn(hyper::Error) -> HttpError = map_hyper_err;
+                    ResponseBody::streaming(incoming.map_err(mapper))
+                },
+                BufferMode::Buffer => {
+                    // Collect inside the retry boundary → full-body retry coverage.
+                    let bytes = incoming.collect().await.map_err(map_hyper_err)?.to_bytes();
+                    ResponseBody::buffered(bytes)
+                },
+            };
             Ok(http::Response::from_parts(parts, body))
         }
     }
@@ -109,6 +124,7 @@ mod tests {
     use bytes::Bytes;
     use http_body_util::BodyExt;
     use oath_adapter_net_http_api::Service;
+    use oath_adapter_net_http_api::{BufferMode, ResponseBody};
     use std::convert::Infallible;
     use std::time::Duration;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -158,6 +174,51 @@ mod tests {
         assert_eq!(resp.status(), http::StatusCode::OK);
         let body = resp.into_body().collect().await.unwrap().to_bytes();
         assert_eq!(body, Bytes::from_static(b"pong"));
+    }
+
+    #[tokio::test]
+    async fn buffer_mode_collects_the_body_into_a_buffered_arm() {
+        let base = spawn_echo_server(b"pong").await;
+        let leaf = hyper_leaf(test_conn());
+        let mut req = http::Request::get(format!("{base}/ping"))
+            .body(Bytes::new())
+            .unwrap();
+        req.extensions_mut().insert(BufferMode::Buffer);
+
+        let resp = leaf.call(req).await.expect("round-trip");
+        assert!(
+            matches!(resp.body(), ResponseBody::Buffered { .. }),
+            "BufferMode::Buffer must yield a Buffered arm, got a streaming body"
+        );
+        let body = resp.into_body().collect().await.unwrap().to_bytes();
+        assert_eq!(body, Bytes::from_static(b"pong"));
+    }
+
+    #[tokio::test]
+    async fn default_and_explicit_stream_keep_a_streaming_body() {
+        let base = spawn_echo_server(b"pong").await;
+        let leaf = hyper_leaf(test_conn());
+
+        // No BufferMode extension → default Stream (ADR-0030 §4).
+        let req = http::Request::get(format!("{base}/a"))
+            .body(Bytes::new())
+            .unwrap();
+        let resp = leaf.call(req).await.expect("round-trip");
+        assert!(
+            matches!(resp.body(), ResponseBody::Streaming { .. }),
+            "absent BufferMode must stay streaming"
+        );
+
+        // Explicit BufferMode::Stream → same.
+        let mut req = http::Request::get(format!("{base}/b"))
+            .body(Bytes::new())
+            .unwrap();
+        req.extensions_mut().insert(BufferMode::Stream);
+        let resp = leaf.call(req).await.expect("round-trip");
+        assert!(
+            matches!(resp.body(), ResponseBody::Streaming { .. }),
+            "explicit Stream must stay streaming"
+        );
     }
 
     #[tokio::test]
