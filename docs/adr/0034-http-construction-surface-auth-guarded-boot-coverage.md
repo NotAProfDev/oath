@@ -232,9 +232,10 @@ carries the full reasoning.
    stack; after the cooldown it admits `half_open_probes` **Half-Open** probes (a
    reached-host outcome closes, a failure re-opens). Outcomes are a **4-class
    partition**: `Connection`/`Timeout`/`5xx` → *Failure*; `Throttled`/429 →
-   *TripNow*; `4xx`/`Auth`/`Unknown` → *Ignored* (never trips **and never resets** —
-   so an interleave cannot mask a building outage; an `Auth` error must not trip the
-   gateway); `2xx`/`3xx` → *Success*. `failure_threshold`/`half_open_probes` are
+   *TripNow*; `4xx`/`Auth`/`Unknown` → *Ignored* (never trips, and **never resets the
+   Closed-state failure streak** — so an interleave cannot mask a building outage; an
+   `Auth` error must not trip the gateway; in **Half-Open** a reached-host `Ignored`
+   still resolves the probe like a `Success`); `2xx`/`3xx` → *Success*. `failure_threshold`/`half_open_probes` are
    `NonZeroU32` (typing §5's `u32` — "≥ 1" a type invariant, infallible `new`). A
    **single per-host** breaker shared behind `Arc`; **consecutive-count** for v1;
    `now()`-only timing (lazy Open→Half-Open, no sleep, no `futures-util`, no new

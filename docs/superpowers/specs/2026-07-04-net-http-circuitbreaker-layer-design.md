@@ -412,6 +412,7 @@ only — **no** `futures-util` race, **no** `sleep`, **no**
 3. **Test executor.** `#[tokio::test]` for the Service tests (parity with the shipped
    layers); the pure `Breaker` tests need no executor at all — a benefit of the
    pure-core cut.
-4. **`half_open_probes > 1` semantics.** v1 ships the `NonZeroU32` knob and the
-   `probes_left`/`successes_needed` accounting handles `> 1`, but IBKR uses `1`; confirm
-   whether to table-test the `> 1` path now (cheap, proves the generality) or defer.
+4. **`half_open_probes > 1` semantics.** *Resolved:* v1 ships the `NonZeroU32` knob and
+   the `probes_left`/`successes_needed` accounting handles `> 1`; IBKR uses `1`, but the
+   `> 1` path **is table-tested now** (cheap, proves the generality) — see the Testing
+   section's two-probe concurrency-gate case.
