@@ -6,6 +6,9 @@
 //! over a fresh `hyper_leaf`, so backend choice stays behind the `HttpClient`
 //! seam (ADR-0030 §6).
 
+mod error;
+pub mod leaf;
 pub mod timer;
 
+pub use leaf::{ConnConfig, HyperBody, HyperLeaf, hyper_leaf};
 pub use timer::TokioTimer;
