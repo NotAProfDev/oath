@@ -5,3 +5,7 @@
 //! assembles the canonical resilience stack (`oath_adapter_net_http_api::stack`)
 //! over a fresh `hyper_leaf`, so backend choice stays behind the `HttpClient`
 //! seam (ADR-0030 §6).
+
+pub mod timer;
+
+pub use timer::TokioTimer;
