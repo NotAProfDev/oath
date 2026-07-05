@@ -219,3 +219,26 @@ carries the full reasoning.
    seeded `SplitMix64` (no `rand` dependency, no injected `Jitter` generic — the
    RNG is a pure computation); a **total-elapsed retry budget** and **`Retry-After`
    parsing** are deferred (each an additive follow-up). No new dependency.
+
+9. **`CircuitBreaker` layer (Slice 1 PR 4).** The `CircuitBreaker<S, T>` layer +
+   `CircuitBreakerLayer<T>` factory add the **reactive** backstop to `RateLimit`'s
+   proactive pacing (ADR-0031 §5). A pure, clock-injected `Breaker` state machine
+   (Closed/Open/Half-Open) — table-tested with zero async — sits behind a thin
+   `Arc<Mutex<Breaker>>` + `Timer` Service shell. It trips **Open** on
+   `CircuitBreakerConfig::failure_threshold` consecutive `Connection`/`Timeout`/`5xx`
+   failures, or **immediately** on a `Throttled`/429 with the long `throttle_cooldown`
+   (IBKR's penalty box); while Open it **fast-rejects** with a **new non-retryable
+   `HttpError::CircuitOpen` / `ErrorKind::CircuitOpen`** without touching the inner
+   stack; after the cooldown it admits `half_open_probes` **Half-Open** probes (a
+   reached-host outcome closes, a failure re-opens). Outcomes are a **4-class
+   partition**: `Connection`/`Timeout`/`5xx` → *Failure*; `Throttled`/429 →
+   *TripNow*; `4xx`/`Auth`/`Unknown` → *Ignored* (never trips, and **never resets the
+   Closed-state failure streak** — so an interleave cannot mask a building outage; an
+   `Auth` error must not trip the gateway; in **Half-Open** a reached-host `Ignored`
+   still resolves the probe like a `Success`); `2xx`/`3xx` → *Success*. `failure_threshold`/`half_open_probes` are
+   `NonZeroU32` (typing §5's `u32` — "≥ 1" a type invariant, infallible `new`). A
+   **single per-host** breaker shared behind `Arc`; **consecutive-count** for v1;
+   `now()`-only timing (lazy Open→Half-Open, no sleep, no `futures-util`, no new
+   dependency). It sits **outside `Retry`**, counting logical post-retry outcomes.
+   Deferred: the resilience4j fail-safe `Unknown → Failure`, rolling-window counting,
+   per-key breakers, and a breaker-state observation watch.

@@ -33,6 +33,12 @@ pub enum ErrorKind {
 
     /// The error does not fit any other category.
     Unknown,
+
+    /// A circuit breaker rejected the request without sending it — the breaker is
+    /// Open after prior failures (or a throttle) and is failing fast until its
+    /// cooldown elapses. A deliberate local decision, not a transport outcome;
+    /// non-retryable.
+    CircuitOpen,
 }
 
 /// Implemented by error types that can be classified as an [`ErrorKind`].

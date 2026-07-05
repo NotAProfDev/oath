@@ -14,6 +14,8 @@
 //!   the `RateScope`/`Scope` per-request directive
 //! - [`retry`] — the `Retry` layer, its `RetryLayer` factory, and the
 //!   `Retryable`/`RetryConfig` retry directive + schedule
+//! - [`circuit_breaker`] — the `CircuitBreaker` layer, its `CircuitBreakerLayer`
+//!   factory, and the `CircuitBreakerConfig` thresholds
 //! - [`timeout`] — the `Timeout` layer, its `TimeoutLayer` factory, and the
 //!   `RequestTimeout` per-request override
 //!
@@ -23,6 +25,7 @@
 
 pub mod auth;
 pub mod body;
+pub mod circuit_breaker;
 pub mod client;
 pub mod error;
 pub mod rate;
@@ -33,6 +36,7 @@ pub mod timeout;
 
 pub use auth::{Auth, AuthSource, NoAuth, SetHeaders};
 pub use body::{BufferMode, Guarded, ResponseBody};
+pub use circuit_breaker::{CircuitBreaker, CircuitBreakerConfig, CircuitBreakerLayer};
 pub use client::HttpClient;
 pub use error::{BoxError, HttpError};
 pub use rate::{
