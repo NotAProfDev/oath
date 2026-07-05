@@ -556,7 +556,6 @@ dependencies = [
  "rustls",
  "tokio",
  "tokio-rustls",
- "tracing",
  "tracing-subscriber",
 ]
 
