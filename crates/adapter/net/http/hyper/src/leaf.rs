@@ -342,6 +342,31 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn buffered_truncated_body_errors_from_call() {
+        let base = spawn_truncating_server().await;
+        let leaf = hyper_leaf(test_conn());
+        let mut req = http::Request::get(format!("{base}/"))
+            .body(Bytes::new())
+            .unwrap();
+        req.extensions_mut().insert(BufferMode::Buffer);
+
+        // Under `BufferMode::Buffer`, `call` collects the body itself
+        // (`incoming.collect().await.map_err(map_hyper_err)?`), so the truncated
+        // body must fail `call` directly — unlike the streaming-path test above,
+        // where `call` succeeds and the error only appears when the caller later
+        // collects the body. This is what lets Retry re-drive the whole request.
+        let err = leaf
+            .call(req)
+            .await
+            .err()
+            .expect("truncated body must error from call() under Buffer mode");
+        assert!(
+            matches!(err, oath_adapter_net_http_api::HttpError::Other(_)),
+            "expected Other, got {err:?}"
+        );
+    }
+
     // Full TLS path: rcgen self-signed cert → rustls server on loopback → a
     // HyperLeaf whose connector trusts exactly that cert. Exercises the real
     // aws-lc-rs handshake + webpki verification in CI (custom root, not webpki-roots).
