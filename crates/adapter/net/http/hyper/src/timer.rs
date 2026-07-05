@@ -4,7 +4,8 @@ use oath_adapter_net_api::Timer;
 use std::future::Future;
 use std::time::{Duration, Instant};
 
-/// The tokio-backed [`Timer`]: [`sleep`](Timer::sleep) is `tokio::time::sleep`.
+/// The tokio-backed [`Timer`]: [`sleep`](Timer::sleep) and [`now`](Timer::now)
+/// both read tokio's clock (real time in production, virtual time under `start_paused`).
 ///
 /// Zero-sized and `Copy` — the resilience layers hold it by value and clone it
 /// across attempts at no cost.
@@ -17,7 +18,7 @@ impl Timer for TokioTimer {
     }
 
     fn now(&self) -> Instant {
-        Instant::now()
+        tokio::time::Instant::now().into_std()
     }
 }
 
