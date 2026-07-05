@@ -133,6 +133,15 @@ The cost is more wiring (we assemble the pooled HTTPS connector); it is containe
 the `HttpClient` seam, so swapping to a future `net-http-reqwest` is zero churn to the
 stack.
 
+> **Amendment (2026-07-05, hyper-backend slice).** The leaf's resolved TLS
+> wiring: crypto provider **aws-lc-rs** (the rustls 0.23 default; FIPS-capable);
+> trust anchors **webpki-roots** (bundled Mozilla roots — reproducible,
+> container-friendly, no OS trust-store dependency); ALPN offers `h2`+`http/1.1`.
+> `ConnConfig` exposes three knobs — `pool_max_idle_per_host`, `pool_idle_timeout`,
+> and `connect_timeout` (a distinct, tighter bound on connect+handshake, separate
+> from the per-attempt `Timeout` layer). See
+> [the hyper-backend design](../superpowers/specs/2026-07-05-net-http-hyper-backend-design.md).
+
 ### 8. Default assembled stack, data config, three-tier override
 
 `oath-adapter-net-http-hyper` ships the canonical stack behind a data-driven
