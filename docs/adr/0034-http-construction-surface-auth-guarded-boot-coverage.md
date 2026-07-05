@@ -280,8 +280,10 @@ carries the full reasoning.
     The one generic pacing arg (`RateLimitConfig<K>`), `auth`, and `timer` are separate
     `stack()` parameters. **Bound refinement:** the spec sketch's `T: Timer, A:
     AuthSource, K: RateKey` becomes `T: Timer + 'static, A: AuthSource + 'static, K:
-    RateKey + Debug` in the implementation (the composed value is returned `'static`;
-    coverage validation renders the offending key). `BufferOrStream` is **not** a
+    RateKey + Debug` in the implementation, plus the leaf's `S::Body: Send`
+    (transitively required by `Retry`/`RateLimit`'s existing `B: Send` bound) — the
+    composed value is returned `'static`; coverage validation renders the offending
+    key. `BufferOrStream` is **not** a
     layer here — buffering is a leaf-side body-construction concern, so the innermost
     leaf already satisfies "inside `Retry`". Full-stack ordering invariants are
     regression-tested over an inline recording leaf + `MockTimer` (not `MockClient`,
