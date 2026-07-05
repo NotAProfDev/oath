@@ -93,6 +93,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   span (a no-op without a `Tracing` span). Routed to the ADR-0014 Telemetry plane. Adds the
   `tracing` facade (runtime dep) + `tracing-subscriber` (dev-dep). (ADR-0031 §6, ADR-0014,
   ADR-0034.)
+- `oath-adapter-net-http-api` `stack()` assembly + `HttpConfig` (Slice 2, assembly) —
+  `stack<S, T, A, K>()` composes the canonical resilience order (ADR-0031 §1)
+  `Tracing(CircuitBreaker(Retry(RateLimit(Timeout(SetHeaders(Auth(leaf)))))))` over any
+  leaf, returning `Result<impl HttpClient + Clone + Send + Sync + 'static, BuildError>`.
+  It builds the fallible `RateLimit` layer first (running `validate_coverage` +
+  `validate_concurrency_singleton`), so a coverage/param/singleton failure is a boot
+  error before the rest is assembled. `HttpConfig` is the non-generic aggregate
+  (`timeout`, `retry`, `circuit_breaker`, `headers`, `rate_limit_max_wait`); the pacing
+  map, `auth`, and `timer` are separate arguments. Full-stack ordering invariants
+  (CircuitBreaker-outside-Retry, RateLimit-inside-Retry, send-Timeout, per-attempt
+  Auth, Scope fail-closed) are regression-tested over an inline leaf + `MockTimer`. No
+  new dependency; no existing-layer change. (ADR-0031 §1, ADR-0034.) The hyper leaf +
+  `build()` land in the following slice.
 - net-http construction-surface design refinements (ADR-0034 append-only
   Amendments 2026-07-04, spec updated) — an absent `RateLimit<K>` directive now
   **fails closed** (not "defaults to `Global`"), closing the last silent
