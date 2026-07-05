@@ -254,7 +254,7 @@ where
                     Err(e) => tracing::event!(
                         tracing::Level::DEBUG,
                         attempt = u64::from(attempt),
-                        error_kind = ?e.kind(),
+                        error_kind = crate::trace::kind_label(e.kind()),
                         "http.attempt"
                     ),
                 }

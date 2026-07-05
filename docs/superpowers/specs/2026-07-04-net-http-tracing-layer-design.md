@@ -53,7 +53,7 @@ count observable.
 ## Scope (in)
 
 - The `Tracing<S, T>` service + `TracingLayer<T>` factory (impl'ing `net-api::Layer`),
-  in `oath-adapter-net-http-api`, new file `tracing.rs`.
+  in `oath-adapter-net-http-api`, new file `trace.rs`.
 - **One span** (`info_span!("http.request", …)`) per `call`, attached to the inner
   future via `tracing::Instrument` so downstream events nest under it; the deferred
   fields recorded on completion.
@@ -313,7 +313,7 @@ is an **inline** `Service` double (no `MockClient` — cycle). Cases:
 ## Definition of done
 
 - `Tracing<S, T>` + `TracingLayer<T>` implemented as specified; `retry.rs` gains the
-  per-attempt events + ambient `attempts` record; `lib.rs` gains `pub mod tracing;` +
+  per-attempt events + ambient `attempts` record; `lib.rs` gains `pub mod trace;` +
   re-exports (`Tracing`, `TracingLayer`) + a module-doc bullet; all with the tests above.
 - `Cargo.toml` (workspace) declares `tracing-subscriber`; net-http-api `Cargo.toml` adds
   `tracing` (dep) + `tracing-subscriber` (dev-dep).
@@ -339,6 +339,6 @@ is an **inline** `Service` double (no `MockClient` — cycle). Cases:
    terminal `http.retry.exhausted` event. Leaning the plain field + per-attempt `debug`
    events; a terminal event is additive later if a subscriber wants it.
 3. **Capturing subscriber location** — a small reusable capture `Layer` in the test
-   module of `tracing.rs`, or shared with `retry.rs`'s new attempt-count test via a
+   module of `trace.rs`, or shared with `retry.rs`'s new attempt-count test via a
    `#[cfg(test)]` helper. Leaning per-file inline (parity with the inline-double
    convention) unless duplication bites.

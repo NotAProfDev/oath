@@ -27,7 +27,7 @@ use tracing::field::Empty;
 /// The `_` arm covers the `#[non_exhaustive]` enum, so a new variant (e.g. a
 /// future `CircuitBreaker` classification added by the concurrent PR) compiles
 /// without touching this layer.
-const fn kind_label(kind: ErrorKind) -> &'static str {
+pub(crate) const fn kind_label(kind: ErrorKind) -> &'static str {
     match kind {
         ErrorKind::Timeout => "timeout",
         ErrorKind::Connection => "connection",
