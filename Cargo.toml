@@ -8,6 +8,7 @@ members = [
   "crates/adapter/net/api",
   "crates/adapter/net/mock",
   "crates/adapter/net/http/api",
+  "crates/adapter/net/http/hyper",
   "crates/adapter/net/http/mock",
   "crates/adapter/net/ws/api",
   "crates/adapter/net/ws/mock",
@@ -47,6 +48,7 @@ oath-model = { path = "crates/model", version = "0.1.0" }
 oath-adapter-net-api = { path = "crates/adapter/net/api", version = "0.1.0" }
 oath-adapter-net-mock = { path = "crates/adapter/net/mock", version = "0.1.0" }
 oath-adapter-net-http-api = { path = "crates/adapter/net/http/api", version = "0.1.0" }
+oath-adapter-net-http-hyper = { path = "crates/adapter/net/http/hyper", version = "0.1.0" }
 oath-adapter-net-http-mock = { path = "crates/adapter/net/http/mock", version = "0.1.0" }
 oath-adapter-net-ws-api = { path = "crates/adapter/net/ws/api", version = "0.1.0" }
 oath-adapter-net-ws-mock = { path = "crates/adapter/net/ws/mock", version = "0.1.0" }
@@ -85,6 +87,24 @@ tracing-subscriber = { version = "0.3", default-features = false, features = [
 ] }
 proptest = "1"
 serde_json = "1"
+hyper = { version = "1", features = ["client", "http1", "http2"] }
+hyper-util = { version = "0.1", features = [
+  "client",
+  "client-legacy",
+  "http1",
+  "http2",
+  "tokio",
+] }
+hyper-rustls = { version = "0.27", default-features = false, features = [
+  "http1",
+  "http2",
+  "aws-lc-rs",
+  "webpki-roots",
+] }
+rustls = { version = "0.23", default-features = false, features = [
+  "aws-lc-rs",
+] }
+rcgen = "0.13"
 
 # --- Lints ---
 # Centralized lint configuration inherited by all workspace crates via `[lints] workspace = true`.
