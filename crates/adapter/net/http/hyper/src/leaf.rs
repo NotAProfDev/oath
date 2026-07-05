@@ -111,6 +111,7 @@ mod tests {
     use oath_adapter_net_http_api::Service;
     use std::convert::Infallible;
     use std::time::Duration;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
 
     fn test_conn() -> ConnConfig {
@@ -211,6 +212,68 @@ mod tests {
         // reports it as a (non-connect) send error → HttpError::Other. We assert
         // it is an error and not a spurious success.
         let err = leaf.call(req).await.err().expect("aborted connection");
+        assert!(
+            matches!(err, oath_adapter_net_http_api::HttpError::Other(_)),
+            "expected Other, got {err:?}"
+        );
+    }
+
+    // A raw-TCP server (not hyper's `service_fn`) that speaks a valid response
+    // head promising a body longer than what it actually sends, then closes the
+    // connection mid-body. This makes the error surface while the body is being
+    // *streamed*, after the response head has already arrived successfully — so
+    // it exercises `map_hyper_err` (the streaming-body mapper), not
+    // `map_legacy_err` (the send/response-head mapper).
+    async fn spawn_truncating_server() -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+
+            // Drain the request head so the client's write side completes cleanly.
+            let mut buf = Vec::new();
+            let mut chunk = [0_u8; 256];
+            loop {
+                let n = stream.read(&mut chunk).await.unwrap();
+                assert!(n > 0, "peer closed before sending a full request head");
+                buf.extend_from_slice(&chunk[..n]);
+                if buf.windows(4).any(|w| w == b"\r\n\r\n") {
+                    break;
+                }
+            }
+
+            // Promise 100 bytes of body, deliver 7, then drop the connection.
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\npartial")
+                .await
+                .unwrap();
+            stream.flush().await.unwrap();
+            drop(stream);
+        });
+        format!("http://{addr}")
+    }
+
+    #[tokio::test]
+    async fn truncated_response_body_surfaces_as_other() {
+        let base = spawn_truncating_server().await;
+        let leaf = hyper_leaf(test_conn());
+        let req = http::Request::get(format!("{base}/"))
+            .body(Bytes::new())
+            .unwrap();
+
+        // The head is complete and valid, so the send phase (`map_legacy_err`)
+        // succeeds — proving the subsequent failure comes from the body stream.
+        let resp = leaf.call(req).await.expect("response head must arrive");
+        assert_eq!(resp.status(), http::StatusCode::OK);
+
+        // Unlike the send-phase tests above, the collected `Ok` payload
+        // (`Collected<Bytes>`) *is* `Debug`, so clippy requires `expect_err`
+        // here instead of the `.err().expect()` workaround.
+        let err = resp
+            .into_body()
+            .collect()
+            .await
+            .expect_err("truncated body must error");
         assert!(
             matches!(err, oath_adapter_net_http_api::HttpError::Other(_)),
             "expected Other, got {err:?}"
