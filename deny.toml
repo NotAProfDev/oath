@@ -56,6 +56,18 @@ allow = [
 # Workspace crates are not published to crates.io; skip license checks for them.
 ignore = true
 
+# Per-crate exceptions to the allowlist above — scoped to a single crate so an
+# unusual license doesn't get silently accepted workspace-wide.
+[[licenses.exceptions]]
+# webpki-roots (pulled in by hyper-rustls's `webpki-roots` feature, used by
+# `hyper_leaf`'s default connector) ships Mozilla's CA bundle under
+# CDLA-Permissive-2.0 — a permissive, OSI-recognized data license for the root
+# certificate data itself, not the (Apache-2.0/MIT) code. First surfaced when
+# Task 5 (net-http-hyper) exercised the full hyper/rustls/aws-lc dependency
+# tree through cargo-deny for the first time.
+name = "webpki-roots"
+allow = ["CDLA-Permissive-2.0"]
+
 # --- Bans ---
 # Detects duplicate dependency versions and wildcard version requirements.
 [bans]

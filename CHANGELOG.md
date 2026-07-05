@@ -106,6 +106,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Auth, Scope fail-closed) are regression-tested over an inline leaf + `MockTimer`. No
   new dependency; no existing-layer change. (ADR-0031 §1, ADR-0034.) The hyper leaf +
   `build()` land in the following slice.
+- **net-http hyper backend (transport).** New `oath-adapter-net-http-hyper` crate:
+  `TokioTimer` (the tokio `Timer`), the pooled TLS leaf (`hyper_leaf`/`ConnConfig`/
+  `HyperLeaf`) over hyper-util + rustls (aws-lc-rs, webpki-roots), the
+  `hyper → HttpError` mapping, and `build()` delegating to `stack()`. Response
+  bodies stream; buffering follows in PR B.
 - net-http construction-surface design refinements (ADR-0034 append-only
   Amendments 2026-07-04, spec updated) — an absent `RateLimit<K>` directive now
   **fails closed** (not "defaults to `Global`"), closing the last silent
