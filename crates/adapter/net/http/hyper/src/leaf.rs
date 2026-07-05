@@ -158,4 +158,62 @@ mod tests {
         let body = resp.into_body().collect().await.unwrap().to_bytes();
         assert_eq!(body, Bytes::from_static(b"pong"));
     }
+
+    #[tokio::test]
+    async fn unreachable_host_hits_connect_timeout_as_connection_error() {
+        // 203.0.113.0/24 (TEST-NET-3) is reserved and unroutable — connect stalls
+        // until connect_timeout fires.
+        let conn = ConnConfig {
+            connect_timeout: Duration::from_millis(150),
+            ..test_conn()
+        };
+        let leaf = hyper_leaf(conn);
+        let req = http::Request::get("http://203.0.113.1:9/x")
+            .body(Bytes::new())
+            .unwrap();
+
+        // `Result::expect_err` needs `T: Debug`, but the `Ok` payload
+        // (`Response<ResponseBody<HyperBody>>`) isn't `Debug` — go via `Option`
+        // instead, which only needs `E: Debug` (satisfied by `HttpError`).
+        let err = leaf
+            .call(req)
+            .await
+            .err()
+            .expect("must time out connecting");
+        assert!(
+            matches!(err, oath_adapter_net_http_api::HttpError::Connection(_)),
+            "expected Connection, got {err:?}"
+        );
+    }
+
+    // A server that accepts then immediately drops the connection (no response).
+    async fn spawn_aborting_server() -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            loop {
+                let (stream, _) = listener.accept().await.unwrap();
+                drop(stream); // close without speaking HTTP
+            }
+        });
+        format!("http://{addr}")
+    }
+
+    #[tokio::test]
+    async fn aborted_connection_surfaces_an_http_error() {
+        let base = spawn_aborting_server().await;
+        let leaf = hyper_leaf(test_conn());
+        let req = http::Request::get(format!("{base}/x"))
+            .body(Bytes::new())
+            .unwrap();
+
+        // The connection is established then dropped mid-exchange: hyper-util
+        // reports it as a (non-connect) send error → HttpError::Other. We assert
+        // it is an error and not a spurious success.
+        let err = leaf.call(req).await.err().expect("aborted connection");
+        assert!(
+            matches!(err, oath_adapter_net_http_api::HttpError::Other(_)),
+            "expected Other, got {err:?}"
+        );
+    }
 }
