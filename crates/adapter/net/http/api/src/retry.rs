@@ -235,12 +235,29 @@ where
             let eligible = req.extensions().get::<Retryable>().is_some();
             let max = self.cfg.max_attempts.get();
             let mut attempt: u32 = 1;
+            // Whole-request clone per attempt: `http::Extensions` requires
+            // `Clone` on insert, so `Request<Bytes>` is `Clone` (Bytes is a
+            // cheap refcount bump; the directives ride along). `Auth`/`RateLimit`
+            // re-run inside this call, so credentials/budget refresh for free.
             loop {
-                // Whole-request clone per attempt: `http::Extensions` requires
-                // `Clone` on insert, so `Request<Bytes>` is `Clone` (Bytes is a
-                // cheap refcount bump; the directives ride along). `Auth`/`RateLimit`
-                // re-run inside this call, so credentials/budget refresh for free.
+                // Whole-request clone per attempt (see the existing note above this loop).
                 let outcome = self.inner.call(req.clone()).await;
+                // Per-attempt telemetry — nests under Tracing's span when present,
+                // a no-op otherwise (ADR-0031 §6). `debug`: drill-down, pay-per-use.
+                match &outcome {
+                    Ok(resp) => tracing::event!(
+                        tracing::Level::DEBUG,
+                        attempt = u64::from(attempt),
+                        status = u64::from(resp.status().as_u16()),
+                        "http.attempt"
+                    ),
+                    Err(e) => tracing::event!(
+                        tracing::Level::DEBUG,
+                        attempt = u64::from(attempt),
+                        error_kind = crate::trace::kind_label(e.kind()),
+                        "http.attempt"
+                    ),
+                }
                 let retry = eligible
                     && attempt < max
                     && match &outcome {
@@ -248,11 +265,22 @@ where
                         Ok(resp) => resp.status().is_server_error(), // 5xx only; 429 is 4xx
                     };
                 if !retry {
+                    // Record the final attempt count onto the current span — the
+                    // "http.request" span when composed under Tracing; a no-op
+                    // otherwise (no active span / the field is absent).
+                    tracing::Span::current().record("attempts", u64::from(attempt));
                     return outcome; // success, non-retryable outcome, or attempts exhausted
                 }
                 drop(outcome); // release the prior response's Guarded permit before waiting
                 let ceil = backoff_ceiling(self.cfg.base, self.cfg.cap, attempt);
-                self.timer.sleep(self.rng.duration_in(ceil)).await;
+                let delay = self.rng.duration_in(ceil);
+                tracing::event!(
+                    tracing::Level::DEBUG,
+                    attempt = u64::from(attempt),
+                    backoff_us = u64::try_from(delay.as_micros()).unwrap_or(u64::MAX),
+                    "http.retry.backoff"
+                );
+                self.timer.sleep(delay).await;
                 attempt += 1;
             }
         }

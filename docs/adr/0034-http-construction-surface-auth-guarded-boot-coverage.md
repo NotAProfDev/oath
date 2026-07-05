@@ -242,3 +242,21 @@ carries the full reasoning.
    dependency). It sits **outside `Retry`**, counting logical post-retry outcomes.
    Deferred: the resilience4j fail-safe `Unknown → Failure`, rolling-window counting,
    per-key breakers, and a breaker-state observation watch.
+10. **`Tracing` layer (Slice 1 PR 5).** The outermost `Tracing<S, T>` layer +
+   `TracingLayer<T>` factory (ADR-0031 §6) open one `info` span per logical request
+   and attach it to the inner future via `tracing::Instrument`, so downstream events
+   — including `Retry`'s per-attempt events — nest under it. The span records method,
+   `route` (`uri().path()` — the **query is dropped**, since it can carry tokens),
+   `status` **xor** `ErrorKind` (a `_`-arm label over the `#[non_exhaustive]` enum),
+   `latency_us` (via `Timer::now()` deltas — the layer is `Timer`-generic), and
+   `attempts`. Routed to the ADR-0014 Telemetry plane (machinery metrics, lossy, never
+   canonical). **Secret-safe by construction:** the layer reads only method, path,
+   status, `ErrorKind`, and the clock — never headers, never the body. Body-transparent
+   (`http::Response<B>` untouched, no `B: Send` bound — nothing of type `B` crosses the
+   single await). **Composition contract:** `Tracing` owns the one per-request span;
+   inner resilience layers emit `tracing` **events**, never open their own span — which
+   keeps `Span::current()` at any inner depth resolved to `http.request`, so `Retry`'s
+   `Span::current().record("attempts", n)` populates the field (a graceful no-op when no
+   such span/field is active). Adds the `tracing` facade (runtime dep, zero executor) +
+   `tracing-subscriber` (dev-dep). The module is named `trace` to avoid shadowing the
+   `tracing` crate; the public types are `Tracing`/`TracingLayer`.

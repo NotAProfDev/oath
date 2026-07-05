@@ -82,6 +82,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Arc<Mutex<Breaker>>` + `Timer` shell; single per-host breaker; `now()`-only (no sleep,
   no new dependency). 4-class outcome partition so `4xx`/`Auth`/unclassified errors neither
   trip nor mask an outage. (ADR-0031 §5, ADR-0034.)
+- `oath-adapter-net-http-api` `Tracing` resilience layer (Slice 1 PR 5) — the outermost
+  `Tracing<S, T>` service + `TracingLayer<T>` factory (`net-api::Layer`): one `info` span
+  per logical request (method, route, status, `ErrorKind`, latency, attempts), attached to
+  the inner future via `tracing::Instrument` so downstream events — including `Retry`'s new
+  per-attempt events — nest under it. Latency via `net-api::Timer` deltas; secret-safe by
+  construction (reads only method, `uri().path()` with the query dropped, status,
+  `ErrorKind`, and the clock — never headers or bodies); body-transparent. `Retry` now emits
+  `debug` per-attempt/backoff events and records the final attempt count onto the ambient
+  span (a no-op without a `Tracing` span). Routed to the ADR-0014 Telemetry plane. Adds the
+  `tracing` facade (runtime dep) + `tracing-subscriber` (dev-dep). (ADR-0031 §6, ADR-0014,
+  ADR-0034.)
 - net-http construction-surface design refinements (ADR-0034 append-only
   Amendments 2026-07-04, spec updated) — an absent `RateLimit<K>` directive now
   **fails closed** (not "defaults to `Global`"), closing the last silent
