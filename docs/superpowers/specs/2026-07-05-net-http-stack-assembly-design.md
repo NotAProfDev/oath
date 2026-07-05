@@ -126,10 +126,19 @@ pub fn stack<S, T, A, K>(
 ) -> Result<impl HttpClient + Clone + Send + Sync + 'static, BuildError>
 where
     S: HttpClient + Clone + Send + Sync + 'static,
-    T: Timer,
-    A: AuthSource,
-    K: RateKey,
+    S::Body: Send,
+    T: Timer + 'static,
+    A: AuthSource + 'static,
+    K: RateKey + fmt::Debug,
 ```
+
+> **Bound refinements over the construction-surface sketch.** The sketch wrote
+> `T: Timer, A: AuthSource, K: RateKey`. The implementation adds: `S::Body: Send`
+> (transitively required — `Retry`/`RateLimit` carry a `B: Send` bound, and
+> `HttpClient::Body` is not `Send` by default, so it must surface at `stack()`);
+> `T`/`A` `+ 'static` (the composed value is returned `'static`); and `K: + Debug`
+> (`RateLimitLayer::new` renders the offending key when coverage fails). Recorded in
+> ADR-0034 Amendment #11.
 
 - **Validate via the RateLimit layer.** `RateLimitLayer::new(&rate_limits, timer,
   cfg.rate_limit_max_wait)?` runs `validate_coverage` + `validate_concurrency_singleton`
