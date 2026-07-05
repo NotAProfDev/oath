@@ -260,3 +260,30 @@ carries the full reasoning.
    such span/field is active). Adds the `tracing` facade (runtime dep, zero executor) +
    `tracing-subscriber` (dev-dep). The module is named `trace` to avoid shadowing the
    `tracing` crate; the public types are `Tracing`/`TracingLayer`.
+11. **`stack()` assembly + `HttpConfig` (Slice 2, assembly).** `stack<S, T, A, K>()`
+    (`net-http-api`) assembles the canonical resilience order (ADR-0031 §1) over an
+    arbitrary leaf: `Tracing( CircuitBreaker( Retry( RateLimit( Timeout( SetHeaders(
+    Auth( leaf ) ) ) ) ) ) )`. It builds the one fallible layer (`RateLimitLayer::new`,
+    which runs `validate_coverage` + `validate_concurrency_singleton`) **first**, so a
+    coverage/param/singleton failure is a `BuildError` before the infallible layers are
+    assembled — `stack()` does **not** call `validate_coverage` separately. `Auth`/
+    `SetHeaders` are direct `Service` wrappers (no `Layer` factory), so they pre-wrap
+    the leaf; the five `Layer`-factory layers compose over that via the kernel's
+    `ServiceBuilder`. The return bound is the full `impl HttpClient + Clone + Send +
+    Sync + 'static` (not bare `impl HttpClient`), so a `Send`/`Clone`/`'static`
+    regression in any layer is a compile error *at `stack()`*; `build()` (the following
+    hyper-backend slice) reuses this bound over the hyper leaf. `HttpConfig` is
+    non-generic plain data — `timeout`, `retry`, `circuit_breaker`, `headers`, and
+    `rate_limit_max_wait` (the permit-wait ceiling feeding `RateLimitLayer::new`,
+    distinct from the send `timeout` because `RateLimit` sits outside `Timeout`) — with
+    no type parameter and no `serde` (deserialisation stays in the adapter, ADR-0003).
+    The one generic pacing arg (`RateLimitConfig<K>`), `auth`, and `timer` are separate
+    `stack()` parameters. **Bound refinement:** the spec sketch's `T: Timer, A:
+    AuthSource, K: RateKey` becomes `T: Timer + 'static, A: AuthSource + 'static, K:
+    RateKey + Debug` in the implementation (the composed value is returned `'static`;
+    coverage validation renders the offending key). `BufferOrStream` is **not** a
+    layer here — buffering is a leaf-side body-construction concern, so the innermost
+    leaf already satisfies "inside `Retry`". Full-stack ordering invariants are
+    regression-tested over an inline recording leaf + `MockTimer` (not `MockClient`,
+    which would close the net-http-mock → net-http-api dev-dep cycle and cannot script
+    sequences). No new dependency; no existing-layer change.
