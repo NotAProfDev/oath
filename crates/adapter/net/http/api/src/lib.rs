@@ -20,6 +20,8 @@
 //!   `RequestTimeout` per-request override
 //! - [`trace`] — the `Tracing` layer and its `TracingLayer` factory (outermost;
 //!   one span per request, secret-safe, routed to the ADR-0014 Telemetry plane)
+//! - [`stack()`] — `HttpConfig` and the `stack()` assembly composing the canonical
+//!   resilience order (ADR-0031 §1) over any leaf (Slice 2)
 //!
 //! The resilience layers, `stack`/`build` assembly, and backends land in later
 //! slices. No async runtime, `hyper`, `reqwest`, or `serde` here.
@@ -34,6 +36,7 @@ pub mod rate;
 pub mod rate_limit;
 pub mod retry;
 pub mod service;
+pub mod stack;
 pub mod timeout;
 pub mod trace;
 
@@ -49,5 +52,6 @@ pub use rate::{
 pub use rate_limit::{RateLimit, RateLimitLayer, RateScope, Scope};
 pub use retry::{Retry, RetryConfig, RetryLayer, Retryable};
 pub use service::Service;
+pub use stack::{HttpConfig, stack};
 pub use timeout::{RequestTimeout, Timeout, TimeoutLayer};
 pub use trace::{Tracing, TracingLayer};
