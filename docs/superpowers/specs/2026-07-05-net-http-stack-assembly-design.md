@@ -43,7 +43,7 @@ ordering-invariant tests that only an assembly makes possible.
 
 Deliver `HttpConfig` and `stack()` so the canonical resilience stack can be assembled
 once, over any leaf, and its **ordering invariants** (not just per-layer behaviours)
-are regression-tested deterministically over `MockClient` + `MockTimer`.
+are regression-tested deterministically over an inline recording leaf + `MockTimer`.
 
 ## Scope (in)
 
@@ -52,7 +52,7 @@ are regression-tested deterministically over `MockClient` + `MockTimer`.
   arbitrary `HttpClient` leaf, returning `Result<impl HttpClient + Clone + Send + Sync
   + 'static, BuildError>`.
 - **Ordering-invariant + boot-coverage + fail-closed tests** over
-  `stack(MockClient, …, MockTimer)`.
+  `stack(<inline recording leaf>, …, MockTimer)` (no `MockClient` — see Testing).
 - **ADR-0034 amendment + CHANGELOG.**
 
 ## Non-goals (deferred — the hyper-backend slice)
@@ -83,29 +83,40 @@ pub struct HttpConfig {
     pub circuit_breaker: CircuitBreakerConfig,
     /// Static default request headers, stamped by `SetHeaders` (just outside `Auth`).
     pub headers: HeaderMap,
+    /// Ceiling on how long an exhausted bucket back-pressures before the request
+    /// returns `HttpError::Throttled` — `RateLimitLayer::new`'s third parameter.
+    /// Distinct from `timeout`: `RateLimit` sits **outside** `Timeout`, so the permit
+    /// wait is bounded by this, not the send timeout — and at IBKR's 1/15-min buckets
+    /// it is minutes, not seconds.
+    pub rate_limit_max_wait: Duration,
 }
 ```
 
-**Four fields, exactly.** `Tracing` needs no config (only the clock). Rate-limit
-config is the one generic arg, isolated so `HttpConfig` stays non-generic. `Auth` is
-supplied as the `auth: A` value. `HttpConfig` is a plain struct literal (not
-`#[non_exhaustive]`): adapters construct it directly, matching every other config type
-in the crate; a future field is a deliberate, reviewed breaking change, not something
-to pre-absorb (YAGNI).
+**Five fields, exactly.** `Tracing` needs no config (only the clock). The pacing
+*map* is the one generic arg (`RateLimitConfig<K>`), isolated so `HttpConfig` stays
+non-generic; the pacing *permit-wait ceiling* (`rate_limit_max_wait`) is non-generic
+and lives here, feeding `RateLimitLayer::new`'s third parameter. `Auth` is supplied as
+the `auth: A` value. `HttpConfig` is a plain struct literal (not `#[non_exhaustive]`):
+adapters construct it directly, matching every other config type in the crate; a
+future field is a deliberate, reviewed breaking change, not something to pre-absorb
+(YAGNI).
 
 ### `stack()` — validate, then compose in canonical order
 
 ```rust
 /// Assemble the canonical resilience stack (ADR-0031 §1) over an arbitrary leaf.
 ///
-/// Validates pacing coverage first, so a config that is not total over `K::all()`
-/// (or carries an out-of-range policy param) is a `BuildError` before any layer is
-/// constructed. Then composes, outermost-first:
+/// Builds the fallible `RateLimit` layer **first**, so a config that is not total
+/// over `K::all()` (or carries an out-of-range policy param, or breaches the
+/// ≤1-concurrency-permit invariant) is a `BuildError` before the infallible layers
+/// are assembled. Then composes, outermost-first:
 /// `Tracing( CircuitBreaker( Retry( RateLimit( Timeout( SetHeaders( Auth( leaf ) ) ) ) ) ) )`.
 ///
 /// # Errors
-/// [`BuildError`] if `rate_limits` is not total over `K::all()` or any policy is
-/// out of range (propagated from [`validate_coverage`]).
+/// [`BuildError`] if `rate_limits` is not total over `K::all()`, any policy is out of
+/// range, or the concurrency-singleton invariant is breached — all propagated from
+/// `RateLimitLayer::new` (which runs `validate_coverage` +
+/// `validate_concurrency_singleton` internally).
 pub fn stack<S, T, A, K>(
     leaf: S,
     cfg: HttpConfig,
@@ -120,13 +131,18 @@ where
     K: RateKey,
 ```
 
-- **Validate first.** `validate_coverage(&rate_limits)?` runs before assembly — no
-  layer is built if coverage fails (fail-closed at construction).
+- **Validate via the RateLimit layer.** `RateLimitLayer::new(&rate_limits, timer,
+  cfg.rate_limit_max_wait)?` runs `validate_coverage` + `validate_concurrency_singleton`
+  and is constructed first, so a coverage/param/singleton failure short-circuits with
+  `BuildError` before the rest is assembled (fail-closed at construction). `stack()`
+  does not call `validate_coverage` separately — that would double-validate.
 - **One clock, cloned in.** The single `timer: T` is cloned into each timing layer
   (`CircuitBreaker`, `Retry`, `RateLimit`, `Timeout`, `Tracing`); `Timer: Clone`.
-- **Assembly mechanism.** Composed via the kernel's `ServiceBuilder`/`Layer`
-  machinery (first `.layer()` = outermost), or equivalent direct nesting — an
-  internal detail; the observable contract is the order and the return bound.
+- **Assembly mechanism.** `Auth`/`SetHeaders` are direct `Service` wrappers
+  (`::new(inner, …)`, no `Layer` factory), so they pre-wrap the leaf; the five
+  `Layer`-factory layers compose over that via the kernel's `ServiceBuilder` (first
+  `.layer()` = outermost). The composed value auto-satisfies `HttpClient` (blanket
+  impl). The mechanism is internal; the observable contract is the order + return bound.
 - **Return bound.** The full `impl HttpClient + Clone + Send + Sync + 'static` (not
   bare `impl HttpClient`) turns any `Send`/`Clone`/`'static` regression in a layer
   into a compile error *at `stack()`*, and promises adapters the share/spawn they
@@ -141,30 +157,41 @@ where
 | outermost | `Tracing` | `timer` | one span over the whole logical request |
 | | `CircuitBreaker` | `cfg.circuit_breaker`, `timer` | **outside `Retry`** — short-circuits before retry runs |
 | | `Retry` | `cfg.retry`, `timer` | order-safe, retryability-aware |
-| | `RateLimit` | `rate_limits`, `timer` | **inside `Retry`** — each attempt spends budget |
+| | `RateLimit` | `rate_limits`, `timer`, `cfg.rate_limit_max_wait` | **inside `Retry`** — each attempt spends budget |
 | | `Timeout` | `cfg.timeout`, `timer` | bounds the send, **not** the permit wait |
 | | `SetHeaders` | `cfg.headers` | static stamp, just outside `Auth` |
 | innermost layer | `Auth` | `auth` | re-stamps credentials **per attempt** |
-| leaf | `S` (`MockClient` / hyper) | — | — |
+| leaf | `S` (inline double in tests / hyper in prod) | — | — |
 
 ## Testing
 
-Full-stack over `stack(MockClient, …, MockTimer)` — the only tests that catch a
-builder reorder (per-layer isolation tests cannot). Uses the existing dev-only
-`oath-adapter-net-http-mock` (`MockClient`) + `oath-adapter-net-mock` (`MockTimer`),
-driven on `tokio` (dev-only), consistent with the layer suites.
+Full-stack over `stack(<inline leaf>, …, MockTimer)` — the only tests that catch a
+builder reorder (per-layer isolation tests cannot).
 
-1. **`CircuitBreaker` outside `Retry`** — with the circuit forced open, the leaf is
-   **not** called and `Retry` does not spin: assert zero `MockClient` sends and a
-   `CircuitOpen` outcome.
-2. **`RateLimit` inside `Retry`** — a leaf scripted `503 → 200` under a small bucket:
-   assert each attempt acquires a permit (N attempts ⇒ N acquisitions), proving the
-   limiter sits inside the retry loop.
-3. **`Timeout` bounds the send, not the permit wait** — a leaf that never completes,
-   advanced past `cfg.timeout` via `MockTimer`, yields `HttpError::Timeout`; a long
-   permit wait alone does not trip it.
-4. **`Auth` re-stamps per attempt** — a recording `MockClient` + a counter `AuthSource`
-   sees a fresh credential on each of the N attempts.
+**Leaf: an inline recording double, NOT `MockClient`.** `net-http-api` must not
+dev-depend on `oath-adapter-net-http-mock` — that crate normal-depends on
+`net-http-api`, so the dev-dep closes a cycle that recompiles a second, non-unifying
+copy of the crate (the same constraint every layer suite already follows; see
+`net-http-api-test-doubles` note). And `MockClient` is a fixed-status leaf — it cannot
+script a `503 → 200` sequence or a never-completing send. So the stack tests build a
+small **inline** leaf in the test module: a `Clone` struct with `Arc<Mutex<Vec<..>>>`
+recording + a scripted/hanging response, satisfying `HttpClient + Clone + Send + Sync +
+'static`, exactly like `retry.rs`/`circuit_breaker.rs`'s `ScriptLeaf`. `MockTimer`
+comes from `oath-adapter-net-mock` (an existing dev-dep); tests run on `tokio`
+(dev-only). No new dev-dependency.
+
+1. **`CircuitBreaker` outside `Retry`** — with the circuit forced open (a leaf scripted
+   to fail past `failure_threshold`, then a follow-up request), the leaf is **not**
+   called again and `Retry` does not spin: assert the send count does not increase and
+   the outcome is `HttpError::CircuitOpen`.
+2. **`RateLimit` inside `Retry`** — a leaf scripted `503 → 200` under a rate bucket:
+   assert the second attempt spends a token (advancing `MockTimer` is required between
+   attempts for the token to refill), proving the limiter sits inside the retry loop.
+3. **`Timeout` bounds the send, not the permit wait** — a leaf whose send never
+   completes; advancing `MockTimer` past `cfg.timeout` yields `HttpError::Timeout`.
+4. **`Auth` re-stamps per attempt** — a recording inline leaf + a counter `AuthSource`
+   whose `authorize` stamps a monotonic header: assert each of the N attempts carries a
+   distinct credential.
 5. **Boot coverage** — `stack()` with a `RateLimitConfig` missing a `K::all()` variant
    returns `Err(BuildError::UndeclaredKey)` and constructs nothing.
 6. **`Scope` fail-closed end-to-end** — a request with **no** `RateScope<K>` extension,
@@ -183,7 +210,12 @@ unaffected). Records an ADR-0034 append-only amendment and a `CHANGELOG.md`
 
 ## ADR reconciliation
 
-Append an ADR-0034 amendment recording: `HttpConfig`'s four-field shape and its
-non-generic/`serde`-free rationale; `stack()`'s validate-then-compose contract, exact
-nesting of the seven built layers, and the `BufferOrStream`-is-leaf-side resolution;
-and that `build()` (next slice) delegates to this `stack()` over the hyper leaf.
+Append an ADR-0034 amendment recording: `HttpConfig`'s five-field shape (including
+`rate_limit_max_wait`, which feeds `RateLimitLayer::new` and is distinct from the send
+`timeout` because `RateLimit` sits outside `Timeout`) and its non-generic/`serde`-free
+rationale; `stack()`'s construct-RateLimit-first validation (delegating to
+`RateLimitLayer::new`'s internal `validate_coverage` + `validate_concurrency_singleton`,
+not a separate call) and compose contract; the exact nesting of the seven built layers
+with `Auth`/`SetHeaders` as direct wrappers; the `BufferOrStream`-is-leaf-side
+resolution; and that `build()` (next slice) delegates to this `stack()` over the hyper
+leaf.
