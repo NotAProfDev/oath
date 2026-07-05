@@ -31,6 +31,9 @@ pub enum HttpError {
     /// A backend error that does not fit another variant.
     #[error("network error")]
     Other(#[source] BoxError),
+    /// The circuit breaker is open — the request was rejected without being sent.
+    #[error("circuit open: request rejected without being sent")]
+    CircuitOpen,
 }
 
 impl HttpError {
@@ -61,6 +64,7 @@ impl HasErrorKind for HttpError {
             Self::Throttled => ErrorKind::Throttled,
             Self::Auth(_) => ErrorKind::Auth,
             Self::Other(_) => ErrorKind::Unknown,
+            Self::CircuitOpen => ErrorKind::CircuitOpen,
         }
     }
 }
@@ -77,6 +81,7 @@ mod tests {
         assert_eq!(HttpError::Throttled.kind(), ErrorKind::Throttled);
         assert_eq!(HttpError::auth("expired").kind(), ErrorKind::Auth);
         assert_eq!(HttpError::other("boom").kind(), ErrorKind::Unknown);
+        assert_eq!(HttpError::CircuitOpen.kind(), ErrorKind::CircuitOpen);
     }
 
     #[test]

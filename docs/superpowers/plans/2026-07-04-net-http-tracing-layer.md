@@ -806,7 +806,7 @@ Expected: PR open, GitHub Actions CI green (same `just ci` + MSRV job).
 - Composition contract (inner layers emit events, not spans) — recorded in the ADR amendment (Task 3 Step 1) + relied on by the integration test. ✅
 - `tracing` runtime dep + `tracing-subscriber` dev-dep (workspace + crate) — Task 1 Step 1. ✅
 - Capturing-subscriber tests, `MockTimer`, inline doubles, no `MockClient` — Tasks 1–2. ✅
-- ADR-0034 Amendment #9 + CHANGELOG — Task 3. ✅
+- ADR-0034 Amendment #10 + CHANGELOG — Task 3. ✅
 - Deferred (correctly absent): `RouteLabel` templating, metric aggregation/exporters, `stack()`/`build()`, tokio `Timer`, `TimeoutBody` — noted, not built. ✅
 
 **Placeholder scan:** none — every code step carries complete code; every command step carries an expected result. `#<N>` is the real issue number captured in Setup.

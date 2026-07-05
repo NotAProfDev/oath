@@ -71,6 +71,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   exhaustion; body-transparent (drops a superseded response, releasing its `Guarded`
   permit). Adds the `Retryable` marker + `RetryConfig` schedule; jitter via an internal
   seeded `SplitMix64` — no new dependency. (ADR-0031 §2, ADR-0034.)
+- `oath-adapter-net-http-api` `CircuitBreaker` resilience layer (Slice 1 PR 4) — the
+  `CircuitBreaker<S, T>` service + `CircuitBreakerLayer<T>` factory (`net-api::Layer`):
+  the reactive backstop to `RateLimit`. Trips Open after `failure_threshold` consecutive
+  `Connection`/`Timeout`/`5xx` failures, or immediately on a `Throttled`/429 with the long
+  `throttle_cooldown`; fast-rejects with a new non-retryable `HttpError::CircuitOpen`
+  (mapped to a new `ErrorKind::CircuitOpen`) without touching the inner stack; admits
+  bounded Half-Open probes after cooldown (reached-host closes, failure re-opens). Pure
+  clock-injected `Breaker` state machine (Closed/Open/Half-Open) behind a thin
+  `Arc<Mutex<Breaker>>` + `Timer` shell; single per-host breaker; `now()`-only (no sleep,
+  no new dependency). 4-class outcome partition so `4xx`/`Auth`/unclassified errors neither
+  trip nor mask an outage. (ADR-0031 §5, ADR-0034.)
 - `oath-adapter-net-http-api` `Tracing` resilience layer (Slice 1 PR 5) — the outermost
   `Tracing<S, T>` service + `TracingLayer<T>` factory (`net-api::Layer`): one `info` span
   per logical request (method, route, status, `ErrorKind`, latency, attempts), attached to
