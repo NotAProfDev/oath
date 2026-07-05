@@ -162,10 +162,7 @@ mod tests {
     // the `Authorization` header each call saw (for the Auth re-stamp test) and
     // counts calls (for the untouched-leaf assertions). Inline, not `MockClient`,
     // to avoid the net-http-mock -> net-http-api dev-dep cycle.
-    // `Err`/`Hang` are consumed by the Task 2 full-stack tests (circuit-trip,
-    // send-timeout) landing later in this module; `#[allow(dead_code)]` is
-    // temporary scaffolding until then.
-    #[allow(dead_code)]
+    // `Err`/`Hang` drive the Task 2 full-stack tests (circuit-trip, send-timeout).
     #[derive(Clone, Copy)]
     enum Step {
         Status(u16),
@@ -188,13 +185,10 @@ mod tests {
                 timer,
             }
         }
-        // Consumed by the Task 2 full-stack tests (call-count and Auth re-stamp
-        // assertions); `#[allow(dead_code)]` is temporary until then.
-        #[allow(dead_code)]
+        // Used by the Task 2 full-stack tests (call-count and Auth re-stamp assertions).
         fn calls(&self) -> usize {
             self.calls.load(Ordering::Relaxed)
         }
-        #[allow(dead_code)]
         fn seen_auth(&self) -> Vec<Option<String>> {
             self.seen_auth.lock().unwrap().clone()
         }
@@ -238,14 +232,11 @@ mod tests {
     }
 
     // ---- an AuthSource stamping a monotonically-increasing credential -----
-    // Consumed by the Task 2 Auth-restamp-per-attempt test; `#[allow(dead_code)]`
-    // is temporary until then.
-    #[allow(dead_code)]
+    // Used by the Task 2 Auth-restamp-per-attempt test.
     #[derive(Clone)]
     struct CounterAuth {
         n: Arc<AtomicUsize>,
     }
-    #[allow(dead_code)]
     impl CounterAuth {
         fn new() -> Self {
             Self {
@@ -361,5 +352,199 @@ mod tests {
             panic!("expected a BuildError for a non-total rate config");
         };
         assert!(matches!(err, BuildError::UndeclaredKey(ref k) if k.contains("History")));
+    }
+
+    // ---- Task 2 tests -----------------------------------------------------
+
+    // 1. CircuitBreaker OUTSIDE Retry — an open circuit fast-rejects; the leaf is
+    //    untouched and no retry loop spins on the rejection. If CB were INSIDE
+    //    Retry this could not hold: the breaker would be re-consulted per attempt.
+    #[tokio::test]
+    async fn circuit_opens_and_fast_rejects_without_touching_the_leaf() {
+        let timer = MockTimer::new();
+        let leaf = ScriptLeaf::new(timer.clone(), vec![Step::Err]); // always fails
+        let svc = stack(
+            leaf.clone(),
+            http_cfg(3, Duration::from_secs(30), Duration::ZERO), // retry ON (3), zero backoff
+            timer,
+            NoAuth,
+            rate_cfg(),
+        )
+        .expect("total config");
+        // 3 logical failures (each retried 3x → 9 leaf calls) trip the breaker.
+        for _ in 0..3 {
+            let _ = svc.call(req(Scope::Global, None)).await;
+        }
+        let calls_after_trip = leaf.calls();
+        assert_eq!(
+            calls_after_trip, 9,
+            "3 requests x 3 attempts reached the leaf before the trip"
+        );
+        // Next request: circuit is Open → CircuitOpen, leaf untouched, no spin.
+        // `let...else` avoids needing `Debug` on the opaque `Ok` type (see
+        // `missing_key_is_a_build_error_and_constructs_nothing` above).
+        let Err(err) = svc.call(req(Scope::Global, None)).await else {
+            panic!("expected CircuitOpen from an open breaker");
+        };
+        assert!(matches!(err, HttpError::CircuitOpen));
+        assert_eq!(
+            leaf.calls(),
+            9,
+            "open circuit fast-rejects; leaf untouched, Retry never spun"
+        );
+    }
+
+    // 2. RateLimit INSIDE Retry — each attempt re-acquires budget. With a burst-1
+    //    bucket and zero max_wait, the first attempt drains it and the retry
+    //    throttles at the (empty) bucket, so the leaf is hit exactly once. If
+    //    RateLimit were OUTSIDE Retry, the single token would cover the whole
+    //    logical request and the retry would resend to a 200.
+    #[tokio::test]
+    async fn rate_limit_is_spent_per_attempt_inside_retry() {
+        let timer = MockTimer::new();
+        let leaf = ScriptLeaf::new(timer.clone(), vec![Step::Status(503), Step::Status(200)]);
+        // Snapshot: burst 1, refill 1/hour → no refill during the test.
+        let rc = RateLimitConfig {
+            global: LimitPolicy::TokenBucket {
+                rate: 1000,
+                per: Duration::from_secs(1),
+                burst: 1000,
+            },
+            local: HashMap::from([
+                (
+                    Key::Snapshot,
+                    LimitDecl::Policy(LimitPolicy::TokenBucket {
+                        rate: 1,
+                        per: Duration::from_secs(3600),
+                        burst: 1,
+                    }),
+                ),
+                (Key::History, LimitDecl::GlobalOnly),
+            ]),
+        };
+        let svc = stack(
+            leaf.clone(),
+            http_cfg(3, Duration::from_secs(30), Duration::ZERO),
+            timer,
+            NoAuth,
+            rc,
+        )
+        .expect("total config");
+        // `let...else` avoids needing `Debug` on the opaque `Ok` type.
+        let Err(err) = svc.call(req(Scope::Local, Some(Key::Snapshot))).await else {
+            panic!("expected Throttled once the per-attempt bucket is drained");
+        };
+        assert!(
+            matches!(err, HttpError::Throttled),
+            "the retry re-acquired the drained bucket → per-attempt pacing (RateLimit inside Retry)"
+        );
+        assert_eq!(
+            leaf.calls(),
+            1,
+            "only attempt 1 reached the leaf; the retry throttled at the bucket"
+        );
+    }
+
+    // 3. Timeout bounds the SEND. A hanging leaf, with the clock advanced past the
+    //    send timeout, yields Timeout. (RateLimit sits outside Timeout, so the
+    //    permit wait is bounded separately by rate_limit_max_wait — structural.)
+    #[tokio::test]
+    async fn send_timeout_fires_on_a_hanging_leaf() {
+        let timer = MockTimer::new();
+        let leaf = ScriptLeaf::new(timer.clone(), vec![Step::Hang]);
+        let svc = stack(
+            leaf,
+            http_cfg(1, Duration::from_secs(1), Duration::ZERO), // retry OFF, 1s send timeout
+            timer.clone(),
+            NoAuth,
+            rate_cfg(),
+        )
+        .expect("total config");
+        // `tokio::spawn` needs `F::Output: Send`, but the opaque `HttpClient::Body`
+        // carries no `Send` bound (`HttpClient::Body: http_body::Body<..>` only),
+        // so a real response body need not be `Send`. `spawn_local` under a
+        // `LocalSet` drives the same concurrent interleaving (task registers the
+        // sleep, then the timer fires it) without that bound.
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async move {
+                let waiter =
+                    tokio::task::spawn_local(
+                        async move { svc.call(req(Scope::Global, None)).await },
+                    );
+                tokio::task::yield_now().await; // task registers the inner sleep + the 1s deadline
+                timer.advance(Duration::from_secs(1)); // fire the send-timeout deadline
+                // `let...else` avoids needing `Debug` on the opaque `Ok` type.
+                let Err(err) = waiter.await.unwrap() else {
+                    panic!("expected Timeout once the send deadline fires");
+                };
+                assert!(matches!(err, HttpError::Timeout));
+            })
+            .await;
+    }
+
+    // 4. Auth re-stamps per attempt — inside Retry, so each of the N attempts
+    //    carries a fresh credential.
+    #[tokio::test]
+    async fn auth_restamps_a_fresh_credential_on_every_attempt() {
+        let timer = MockTimer::new();
+        let leaf = ScriptLeaf::new(timer.clone(), vec![Step::Err, Step::Err, Step::Status(200)]);
+        let svc = stack(
+            leaf.clone(),
+            http_cfg(3, Duration::from_secs(30), Duration::ZERO),
+            timer,
+            CounterAuth::new(),
+            rate_cfg(),
+        )
+        .expect("total config");
+        let resp = svc
+            .call(req(Scope::Global, None))
+            .await
+            .expect("third attempt is 200");
+        assert_eq!(resp.status(), http::StatusCode::OK);
+        assert_eq!(
+            leaf.seen_auth(),
+            vec![
+                Some("token-0".to_owned()),
+                Some("token-1".to_owned()),
+                Some("token-2".to_owned())
+            ],
+            "Auth ran once per attempt (inside Retry), re-stamping a fresh credential each time"
+        );
+    }
+
+    // 5. Scope fail-closed end-to-end — a request with no RateScope extension is
+    //    rejected before the leaf, and the fail-closed path survives composition.
+    #[tokio::test]
+    async fn absent_scope_is_rejected_fail_closed_through_the_stack() {
+        let timer = MockTimer::new();
+        let leaf = ScriptLeaf::new(timer.clone(), vec![Step::Status(200)]);
+        let svc = stack(
+            leaf.clone(),
+            http_cfg(3, Duration::from_secs(30), Duration::ZERO),
+            timer,
+            NoAuth,
+            rate_cfg(),
+        )
+        .expect("total config");
+        // A request with neither RateScope nor Retryable — the forgotten-stamp case.
+        let bare = http::Request::builder()
+            .method("GET")
+            .uri("/x")
+            .body(Bytes::new())
+            .unwrap();
+        // `let...else` avoids needing `Debug` on the opaque `Ok` type.
+        let Err(err) = svc.call(bare).await else {
+            panic!("expected fail-closed Throttled for a request with no RateScope");
+        };
+        assert!(
+            matches!(err, HttpError::Throttled),
+            "no RateScope → fail-closed Throttled"
+        );
+        assert_eq!(
+            leaf.calls(),
+            0,
+            "the fail-closed request never reached the leaf"
+        );
     }
 }
