@@ -216,4 +216,71 @@ mod tests {
             "expected Other, got {err:?}"
         );
     }
+
+    // Full TLS path: rcgen self-signed cert → rustls server on loopback → a
+    // HyperLeaf whose connector trusts exactly that cert. Exercises the real
+    // aws-lc-rs handshake + webpki verification in CI (custom root, not webpki-roots).
+    #[tokio::test]
+    async fn leaf_round_trips_over_tls_with_a_trusted_self_signed_cert() {
+        use hyper_util::client::legacy::Client;
+        use hyper_util::client::legacy::connect::HttpConnector;
+        use hyper_util::rt::{TokioExecutor, TokioIo};
+        use std::sync::Arc;
+        use tokio::net::TcpListener;
+        use tokio_rustls::TlsAcceptor;
+
+        // 1. Self-signed cert for "localhost".
+        let cert = rcgen::generate_simple_self_signed(vec!["localhost".to_string()]).unwrap();
+        let cert_der = cert.cert.der().clone();
+        let key_der =
+            rustls::pki_types::PrivateKeyDer::try_from(cert.key_pair.serialize_der()).unwrap();
+
+        // 2. rustls server config with that cert.
+        let server_cfg = rustls::ServerConfig::builder()
+            .with_no_client_auth()
+            .with_single_cert(vec![cert_der.clone()], key_der)
+            .unwrap();
+        let acceptor = TlsAcceptor::from(Arc::new(server_cfg));
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            let (tcp, _) = listener.accept().await.unwrap();
+            let tls = acceptor.accept(tcp).await.unwrap();
+            let io = TokioIo::new(tls);
+            let svc = hyper::service::service_fn(|_req| async {
+                Ok::<_, std::convert::Infallible>(hyper::Response::new(http_body_util::Full::new(
+                    Bytes::from_static(b"secure"),
+                )))
+            });
+            let _ = hyper::server::conn::http1::Builder::new()
+                .serve_connection(io, svc)
+                .await;
+        });
+
+        // 3. Client root store trusting only our self-signed cert.
+        let mut roots = rustls::RootCertStore::empty();
+        roots.add(cert_der).unwrap();
+        let client_cfg = rustls::ClientConfig::builder()
+            .with_root_certificates(roots)
+            .with_no_client_auth();
+
+        let mut http = HttpConnector::new();
+        http.enforce_http(false);
+        let https = hyper_rustls::HttpsConnectorBuilder::new()
+            .with_tls_config(client_cfg)
+            .https_or_http()
+            .enable_http1()
+            .wrap_connector(http);
+        let client = Client::builder(TokioExecutor::new()).build(https);
+        let leaf = HyperLeaf { client };
+
+        // 4. Round-trip over https://localhost:PORT (SNI/cert CN = localhost).
+        let req = http::Request::get(format!("https://localhost:{port}/"))
+            .body(Bytes::new())
+            .unwrap();
+        let resp = leaf.call(req).await.expect("tls round-trip");
+        let body = resp.into_body().collect().await.unwrap().to_bytes();
+        assert_eq!(body, Bytes::from_static(b"secure"));
+    }
 }
