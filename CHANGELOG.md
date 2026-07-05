@@ -111,6 +111,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `HyperLeaf`) over hyper-util + rustls (aws-lc-rs, webpki-roots), the
   `hyper → HttpError` mapping, and `build()` delegating to `stack()`. Response
   bodies stream; buffering follows in PR B.
+- **net-http hyper backend (buffering).** The hyper leaf now honours the
+  per-request `BufferMode` (ADR-0030 §4): `BufferMode::Buffer` collects the
+  response body to `Bytes` inside the retry boundary (`ResponseBody::buffered`);
+  absent or `Stream` keeps the live streaming body. Additive — no signature,
+  associated-type, or layer change. (#<PR-B>)
 - net-http construction-surface design refinements (ADR-0034 append-only
   Amendments 2026-07-04, spec updated) — an absent `RateLimit<K>` directive now
   **fails closed** (not "defaults to `Global`"), closing the last silent

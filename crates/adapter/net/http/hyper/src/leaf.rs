@@ -2,7 +2,8 @@
 //! connector.
 //!
 //! Implements [`Service`], so it is an [`HttpClient`](oath_adapter_net_http_api::HttpClient)
-//! by blanket impl (ADR-0030 §6). Response bodies stream (PR A); buffering is PR B.
+//! by blanket impl (ADR-0030 §6). Response bodies stream by default, or buffer
+//! per the request's `BufferMode` (ADR-0030 §4).
 
 use crate::error::{map_hyper_err, map_legacy_err};
 use bytes::Bytes;
