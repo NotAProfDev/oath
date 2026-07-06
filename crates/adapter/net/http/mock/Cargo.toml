@@ -15,5 +15,5 @@ bytes = { workspace = true }
 http-body = { workspace = true }
 
 [dev-dependencies]
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt"] }
 http-body-util = { workspace = true }

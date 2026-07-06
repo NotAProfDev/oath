@@ -12,4 +12,4 @@ workspace = true
 oath-adapter-net-api = { workspace = true }
 
 [dev-dependencies]
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt"] }

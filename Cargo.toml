@@ -77,11 +77,21 @@ http-body-util = "0.1"
 pin-project-lite = "0.2"
 futures-core = { version = "0.3", default-features = false }
 futures-sink = { version = "0.3", default-features = false }
-futures-util = "0.3"
+# Trimmed to explicit features (no default `std`+`async-await` bundle): prod uses
+# `future::{Either, select}`; the `poll!` test macro needs `async-await`.
+futures-util = { version = "0.3", default-features = false, features = [
+  "std",
+  "async-await",
+] }
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
-tokio = { version = "1", features = ["full"] }
-tracing = "0.1"
+# Minimal default features (tokio's default is empty); each crate opts into only
+# what it uses — prod `net-http-hyper` needs `time`, dev/test needs
+# `macros`/`rt`/`net`/`io-util`/`test-util`. Keeps `full` (fs/process/signal/…)
+# out of downstream production binaries (M7).
+tokio = { version = "1", default-features = false }
+# No `attributes` (the `#[instrument]` proc-macro) — only span/event macros used.
+tracing = { version = "0.1", default-features = false, features = ["std"] }
 tracing-subscriber = { version = "0.3", default-features = false, features = [
   "registry",
 ] }
