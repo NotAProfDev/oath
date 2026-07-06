@@ -6,39 +6,32 @@
 //! against. Runtime-neutral: generic over
 //! [`Timer`], semaphore via `async-lock`.
 
-/// Which bucket sets a request spends against (ADR-0031 §3). Stamped by the
-/// adapter as part of a [`RateScope`] request extension.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum Scope {
-    /// Acquire nothing — the **explicit** unlimited opt-out.
-    None,
-    /// Spend against the account-wide global bucket only.
-    Global,
-    /// Spend against this endpoint's local bucket only.
-    Local,
-    /// Spend against both the global and the local bucket.
-    Both,
-}
-
 /// The per-request pacing directive, carried as an `http::Request` extension.
+///
+/// It names which bucket sets a request spends against (ADR-0031 §3) and carries
+/// the endpoint key **inline** on the endpoint-scoped variants, so an illegal
+/// "local scope with no key" is unrepresentable (M6).
 ///
 /// The adapter stamps it when it builds each request (it knows the endpoint).
 /// An **absent** directive is **rejected fail-closed** (`HttpError::Throttled`,
 /// never sent) — a forgotten stamp must not silently fly global-paced-only,
 /// skipping the endpoint's own local limit (ADR-0034 Amendment #1). "Global
-/// only" is said with an explicit [`Scope::Global`]; opt out with
-/// [`Scope::None`]. `Clone` so it survives the per-attempt request clone
+/// only" is said with an explicit [`RateScope::Global`]; opt out with
+/// [`RateScope::None`]. `Clone` so it survives the per-attempt request clone
 /// `Retry` performs (Slice 1).
 #[derive(Debug, Clone)]
-pub struct RateScope<K> {
-    /// Which bucket sets to spend against.
-    pub scope: Scope,
-    /// The endpoint key, required for `Local`/`Both`.
-    pub key: Option<K>,
+pub enum RateScope<K> {
+    /// Acquire nothing — the **explicit** unlimited opt-out.
+    None,
+    /// Spend against the account-wide global bucket only.
+    Global,
+    /// Spend against this endpoint's local bucket only.
+    Local(K),
+    /// Spend against both the global and the local bucket.
+    Both(K),
 }
 
-use crate::body::Guarded;
+use crate::body::{BufferMode, Guarded};
 use crate::rate::{
     LimitDecl, LimitPolicy, RateLimitConfig, validate_concurrency_singleton, validate_coverage,
 };
@@ -220,11 +213,14 @@ where
         &self,
         directive: &RateScope<K>,
     ) -> Result<Option<SemaphoreGuardArc>, HttpError> {
-        if matches!(directive.scope, Scope::None) {
-            return Ok(None);
-        }
-        let want_global = matches!(directive.scope, Scope::Global | Scope::Both);
-        let want_local = matches!(directive.scope, Scope::Local | Scope::Both);
+        // The key rides the endpoint-scoped variants, so "local scope with no key"
+        // is unrepresentable (M6). `None` acquires nothing.
+        let (want_global, key) = match directive {
+            RateScope::None => return Ok(None),
+            RateScope::Global => (true, None),
+            RateScope::Local(key) => (false, Some(key)),
+            RateScope::Both(key) => (true, Some(key)),
+        };
 
         // Collect applicable buckets, rate-type first (ADR-0031 §3 acquire order).
         let mut rate: Vec<&Bucket> = Vec::new();
@@ -235,10 +231,9 @@ where
         if want_global {
             push_bucket(&self.state.global, &mut rate, &mut conc);
         }
-        if want_local {
-            // Fail-closed: `Local`/`Both` require a present key + local bucket,
-            // else the request cannot be paced and must not be sent unthrottled.
-            let key = directive.key.as_ref().ok_or(HttpError::Throttled)?;
+        if let Some(key) = key {
+            // Fail-closed: a `Local`/`Both` key with no local bucket (e.g. a
+            // GlobalOnly endpoint) cannot be paced and must not be sent unthrottled.
             let bucket = self.state.local.get(key).ok_or(HttpError::Throttled)?;
             push_bucket(bucket, &mut rate, &mut conc);
         }
@@ -346,13 +341,22 @@ where
         async move {
             // Absent directive fails closed (ADR-0034 Amendment #1): a forgotten
             // stamp must never fly unpaced or global-only, silently skipping the
-            // endpoint's own local limit. "Global only" is an explicit Scope::Global.
+            // endpoint's own local limit. "Global only" is an explicit
+            // RateScope::Global.
             let Some(directive) = req.extensions().get::<RateScope<K>>().cloned() else {
                 return Err(HttpError::Throttled);
             };
+            // M4 (ADR-0034 §2): a buffered response is fully transferred by the time
+            // `call` returns, so release its concurrency permit now instead of
+            // letting it ride the in-memory body until the caller drains it.
+            let buffered = matches!(
+                req.extensions().get::<BufferMode>(),
+                Some(BufferMode::Buffer)
+            );
             let permit = self.acquire(&directive).await?;
             let resp = self.inner.call(req).await?;
             let (parts, body) = resp.into_parts();
+            let permit = if buffered { None } else { permit };
             Ok(http::Response::from_parts(
                 parts,
                 Guarded::new(body, permit),
@@ -363,7 +367,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{RateLimitLayer, RateScope, Scope};
+    use super::{BufferMode, RateLimitLayer, RateScope};
     use crate::rate::{LimitDecl, LimitPolicy, RateLimitConfig};
     use crate::{HttpError, Service};
     use bytes::Bytes;
@@ -456,17 +460,13 @@ mod tests {
     #[test]
     fn rate_scope_round_trips_through_request_extensions() {
         let mut req = http::Request::new(Bytes::new());
-        req.extensions_mut().insert(RateScope {
-            scope: Scope::Both,
-            key: Some(Key::History),
-        });
+        req.extensions_mut().insert(RateScope::Both(Key::History));
         let got = req
             .extensions()
             .get::<RateScope<Key>>()
             .cloned()
             .expect("directive present");
-        assert!(matches!(got.scope, Scope::Both));
-        assert_eq!(got.key, Some(Key::History));
+        assert!(matches!(got, RateScope::Both(Key::History)));
     }
 
     // global 10/s rate; Snapshot 2/s rate; History concurrency 1.
@@ -498,16 +498,24 @@ mod tests {
         RateLimitLayer::new(&config(), timer, max_wait).expect("valid config")
     }
 
-    fn req(scope: Scope, key: Option<Key>) -> http::Request<Bytes> {
+    fn req(scope: RateScope<Key>) -> http::Request<Bytes> {
         let mut r = http::Request::new(Bytes::new());
-        r.extensions_mut().insert(RateScope { scope, key });
+        r.extensions_mut().insert(scope);
+        r
+    }
+
+    // Same as `req`, plus a `BufferMode::Buffer` stamp — for the M4 permit-release
+    // test (a buffered response frees its concurrency permit at `call`-return).
+    fn req_buffered(scope: RateScope<Key>) -> http::Request<Bytes> {
+        let mut r = req(scope);
+        r.extensions_mut().insert(BufferMode::Buffer);
         r
     }
 
     #[tokio::test]
     async fn a_request_within_budget_passes_and_body_is_guarded() {
         let svc = layer(MockTimer::new(), Duration::from_secs(0)).layer(Leaf::ok(b"ok"));
-        let resp = svc.call(req(Scope::Global, None)).await.expect("passes");
+        let resp = svc.call(req(RateScope::Global)).await.expect("passes");
         let body = resp.into_body().collect().await.unwrap().to_bytes();
         assert_eq!(body, Bytes::from_static(b"ok")); // Response<Guarded<_>> collects transparently
     }
@@ -517,20 +525,20 @@ mod tests {
         let timer = MockTimer::new();
         let svc = layer(timer.clone(), Duration::from_secs(0)).layer(Leaf::ok(b"ok"));
         // Snapshot burst = 2: two pass, third throttles with zero max_wait.
-        svc.call(req(Scope::Local, Some(Key::Snapshot)))
+        svc.call(req(RateScope::Local(Key::Snapshot)))
             .await
             .expect("1st");
-        svc.call(req(Scope::Local, Some(Key::Snapshot)))
+        svc.call(req(RateScope::Local(Key::Snapshot)))
             .await
             .expect("2nd");
         let err = svc
-            .call(req(Scope::Local, Some(Key::Snapshot)))
+            .call(req(RateScope::Local(Key::Snapshot)))
             .await
             .unwrap_err();
         assert!(matches!(err, HttpError::Throttled)); // HttpError has no PartialEq
         // 2 tokens/sec -> one token after 500ms.
         timer.advance(Duration::from_millis(500));
-        svc.call(req(Scope::Local, Some(Key::Snapshot)))
+        svc.call(req(RateScope::Local(Key::Snapshot)))
             .await
             .expect("refilled");
     }
@@ -540,14 +548,14 @@ mod tests {
         let timer = MockTimer::new();
         let svc = layer(timer, Duration::from_secs(0)).layer(Leaf::ok(b"ok"));
         for _ in 0..100 {
-            svc.call(req(Scope::None, None)).await.expect("unlimited");
+            svc.call(req(RateScope::None)).await.expect("unlimited");
         }
     }
 
     #[tokio::test]
     async fn absent_directive_fails_closed() {
         // A request with no RateScope extension is rejected, never sent
-        // (ADR-0034 Amendment #1) — "global only" must be an explicit Scope::Global.
+        // (ADR-0034 Amendment #1) — "global only" must be an explicit RateScope::Global.
         let leaf = Leaf::ok(b"ok");
         let svc = layer(MockTimer::new(), Duration::from_secs(0)).layer(leaf.clone());
         let err = svc
@@ -564,11 +572,11 @@ mod tests {
         // (unread) body; a second concurrent acquire must wait, then throttle.
         let svc = layer(MockTimer::new(), Duration::from_secs(0)).layer(Leaf::ok(b"data"));
         let held = svc
-            .call(req(Scope::Local, Some(Key::History)))
+            .call(req(RateScope::Local(Key::History)))
             .await
             .expect("1st permit");
         let err = svc
-            .call(req(Scope::Local, Some(Key::History)))
+            .call(req(RateScope::Local(Key::History)))
             .await
             .unwrap_err();
         assert!(
@@ -576,9 +584,26 @@ mod tests {
             "permit still held by first body"
         );
         drop(held); // releasing the body frees the permit
-        svc.call(req(Scope::Local, Some(Key::History)))
+        svc.call(req(RateScope::Local(Key::History)))
             .await
             .expect("permit freed");
+    }
+
+    #[tokio::test]
+    async fn buffered_response_releases_concurrency_permit_at_call_return() {
+        // M4 (ADR-0034 §2): with `BufferMode::Buffer` the transfer is complete by the
+        // time `call` returns, so the concurrency permit must NOT ride the (unread)
+        // in-memory body. Contrast `concurrency_permit_is_held_until_body_drop`
+        // (streaming), where the unread body keeps the permit.
+        let svc = layer(MockTimer::new(), Duration::from_secs(0)).layer(Leaf::ok(b"data"));
+        let _first = svc
+            .call(req_buffered(RateScope::Local(Key::History)))
+            .await
+            .expect("1st acquires, then releases the permit at call-return");
+        // The permit is already free even though `_first`'s body is never polled.
+        svc.call(req_buffered(RateScope::Local(Key::History)))
+            .await
+            .expect("buffered permit released at call-return, not held by the body");
     }
 
     #[tokio::test]
@@ -586,14 +611,14 @@ mod tests {
         let timer = MockTimer::new();
         let svc = layer(timer.clone(), Duration::from_secs(30)).layer(Leaf::ok(b"data"));
         let held = svc
-            .call(req(Scope::Local, Some(Key::History)))
+            .call(req(RateScope::Local(Key::History)))
             .await
             .expect("1st permit");
         // Second acquire blocks on the semaphore; spawn it, free the permit, and
         // it completes within max_wait.
         let svc2 = svc.clone();
         let waiter =
-            tokio::spawn(async move { svc2.call(req(Scope::Local, Some(Key::History))).await });
+            tokio::spawn(async move { svc2.call(req(RateScope::Local(Key::History))).await });
         tokio::task::yield_now().await;
         drop(held);
         waiter.await.unwrap().expect("acquired after release");
@@ -617,18 +642,9 @@ mod tests {
         let leaf = Leaf::ok(b"ok");
         let svc = l.layer(leaf.clone());
         let err = svc
-            .call(req(Scope::Local, Some(Key::Snapshot)))
+            .call(req(RateScope::Local(Key::Snapshot)))
             .await
             .unwrap_err();
-        assert!(matches!(err, HttpError::Throttled));
-        assert_eq!(leaf.calls(), 0, "must never reach the leaf");
-    }
-
-    #[tokio::test]
-    async fn local_scope_with_no_key_fails_closed() {
-        let leaf = Leaf::ok(b"ok");
-        let svc = layer(MockTimer::new(), Duration::from_secs(0)).layer(leaf.clone());
-        let err = svc.call(req(Scope::Local, None)).await.unwrap_err();
         assert!(matches!(err, HttpError::Throttled));
         assert_eq!(leaf.calls(), 0, "must never reach the leaf");
     }
@@ -649,16 +665,16 @@ mod tests {
         let svc = RateLimitLayer::new(&cfg, timer.clone(), Duration::from_secs(0))
             .expect("valid config")
             .layer(Leaf::ok(b"ok"));
-        svc.call(req(Scope::Local, Some(Key::Snapshot)))
+        svc.call(req(RateScope::Local(Key::Snapshot)))
             .await
             .expect("1st admitted");
         let err = svc
-            .call(req(Scope::Local, Some(Key::Snapshot)))
+            .call(req(RateScope::Local(Key::Snapshot)))
             .await
             .unwrap_err();
         assert!(matches!(err, HttpError::Throttled));
         timer.advance(Duration::from_secs(5));
-        svc.call(req(Scope::Local, Some(Key::Snapshot)))
+        svc.call(req(RateScope::Local(Key::Snapshot)))
             .await
             .expect("refilled after 5s");
     }

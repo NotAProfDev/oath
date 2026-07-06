@@ -25,7 +25,7 @@ pub fn build<T, A, K>(
     auth: A,
     rate_limits: RateLimitConfig<K>,
     conn: ConnConfig,
-) -> Result<impl HttpClient + Clone + Send + Sync + 'static, BuildError>
+) -> Result<impl HttpClient<Body: Send> + Clone + Send + Sync + 'static, BuildError>
 where
     T: Timer + 'static,
     A: AuthSource + 'static,
@@ -44,7 +44,7 @@ mod tests {
     use oath_adapter_net_http_api::rate::{LimitDecl, LimitPolicy, RateLimitConfig};
     use oath_adapter_net_http_api::{
         BuildError, CircuitBreakerConfig, HttpConfig, NoAuth, RateKey, RateScope, RetryConfig,
-        Scope, Service,
+        Service,
     };
     use std::collections::HashMap;
     use std::convert::Infallible;
@@ -139,11 +139,8 @@ mod tests {
         let mut req = http::Request::get(format!("{base}/x"))
             .body(Bytes::new())
             .unwrap();
-        // Fail-closed pacing: every request carries an explicit Scope (ADR-0034 #1).
-        req.extensions_mut().insert(RateScope::<Key> {
-            scope: Scope::Global,
-            key: None,
-        });
+        // Fail-closed pacing: every request carries an explicit RateScope (ADR-0034 #1).
+        req.extensions_mut().insert(RateScope::<Key>::Global);
 
         let resp = client
             .call(req)
@@ -165,8 +162,8 @@ mod tests {
             local: HashMap::new(),
         };
         // `.expect_err()` would require `Debug` on the opaque `Ok` type, which the
-        // return bound (`impl HttpClient + Clone + Send + Sync + 'static`) deliberately
-        // omits; `let...else` extracts the error without needing it.
+        // return bound (`impl HttpClient<Body: Send> + Clone + Send + Sync + 'static`)
+        // deliberately omits; `let...else` extracts the error without needing it.
         let Err(err) = build(http_cfg(), TokioTimer, NoAuth, rates, conn()) else {
             panic!("missing coverage must fail closed");
         };

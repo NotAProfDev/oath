@@ -33,6 +33,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`default-features = false`), dropping the `futures-macro`/`tracing-attributes`
   proc-macro trees and `parking_lot`; the unused `tracing-subscriber` dev-dependency is
   removed from `net-http-hyper` (L6, L5). No behaviour or public-API change.
+- **Breaking (pre-release) — net-http API shape.** Four related surface changes:
+  `RateScope<K>` is now an enum (`None`/`Global`/`Local(K)`/`Both(K)`) carrying the
+  endpoint key inline, so an illegal "local scope with no key" is unrepresentable
+  (M6); `ResponseBody` is an **opaque** struct — its buffer-vs-stream arms are
+  private, inspected via `is_buffered()`/`is_streaming()` and consumed through the
+  `Body` trait (M9); `stack()`/`build()` now return
+  `impl HttpClient<Body: Send> + Clone + Send + Sync + 'static`, so response bodies
+  cross `tokio::spawn` without the `LocalSet`/`spawn_local` workaround (M5); and
+  `RateLimit` releases a concurrency permit at `call`-return for
+  `BufferMode::Buffer` responses instead of letting it ride the in-memory body until
+  the caller drains it (M4). No external users (pre-release).
 
 ### Added
 

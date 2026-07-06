@@ -80,7 +80,7 @@ pub fn stack<S, T, A, K>(
     timer: T,
     auth: A,
     rate_limits: RateLimitConfig<K>,
-) -> Result<impl HttpClient + Clone + Send + Sync + 'static, BuildError>
+) -> Result<impl HttpClient<Body: Send> + Clone + Send + Sync + 'static, BuildError>
 where
     S: HttpClient + Clone + Send + Sync + 'static,
     S::Body: Send,
@@ -109,7 +109,7 @@ mod tests {
     use crate::rate::{LimitDecl, LimitPolicy, RateLimitConfig};
     use crate::{
         AuthSource, BuildError, CircuitBreakerConfig, HttpError, NoAuth, RateKey, RateScope,
-        RetryConfig, Retryable, Scope, Service,
+        RetryConfig, Retryable, Service,
     };
     use bytes::Bytes;
     use http_body::{Body, Frame, SizeHint};
@@ -314,13 +314,13 @@ mod tests {
             ]),
         }
     }
-    fn req(scope: Scope, key: Option<Key>) -> http::Request<Bytes> {
+    fn req(scope: RateScope<Key>) -> http::Request<Bytes> {
         let mut r = http::Request::builder()
             .method("GET")
             .uri("/x")
             .body(Bytes::new())
             .unwrap();
-        r.extensions_mut().insert(RateScope { scope, key });
+        r.extensions_mut().insert(scope);
         r.extensions_mut().insert(Retryable); // opt in so Retry engages when max_attempts > 1
         r
     }
@@ -339,7 +339,7 @@ mod tests {
             rate_cfg(),
         )
         .expect("total config");
-        let resp = svc.call(req(Scope::Global, None)).await.expect("200");
+        let resp = svc.call(req(RateScope::Global)).await.expect("200");
         assert_eq!(resp.status(), http::StatusCode::OK);
         let body = resp.into_body().collect().await.unwrap().to_bytes();
         assert_eq!(body, Bytes::from_static(b"ok")); // through all 7 layers + Guarded, untouched
@@ -352,8 +352,8 @@ mod tests {
         let mut rc = rate_cfg();
         rc.local.remove(&Key::History); // no longer total over Key::all()
         // `.unwrap_err()` would require `Debug` on the opaque `Ok` type, which the
-        // return bound (`impl HttpClient + Clone + Send + Sync + 'static`) deliberately
-        // omits; `let...else` extracts the error without needing it.
+        // return bound (`impl HttpClient<Body: Send> + Clone + Send + Sync + 'static`)
+        // deliberately omits; `let...else` extracts the error without needing it.
         let Err(err) = stack(
             leaf,
             http_cfg(1, Duration::from_secs(30), Duration::ZERO),
@@ -385,7 +385,7 @@ mod tests {
         .expect("total config");
         // 3 logical failures (each retried 3x → 9 leaf calls) trip the breaker.
         for _ in 0..3 {
-            let _ = svc.call(req(Scope::Global, None)).await;
+            let _ = svc.call(req(RateScope::Global)).await;
         }
         let calls_after_trip = leaf.calls();
         assert_eq!(
@@ -395,7 +395,7 @@ mod tests {
         // Next request: circuit is Open → CircuitOpen, leaf untouched, no spin.
         // `let...else` avoids needing `Debug` on the opaque `Ok` type (see
         // `missing_key_is_a_build_error_and_constructs_nothing` above).
-        let Err(err) = svc.call(req(Scope::Global, None)).await else {
+        let Err(err) = svc.call(req(RateScope::Global)).await else {
             panic!("expected CircuitOpen from an open breaker");
         };
         assert!(matches!(err, HttpError::CircuitOpen));
@@ -443,7 +443,7 @@ mod tests {
         )
         .expect("total config");
         // `let...else` avoids needing `Debug` on the opaque `Ok` type.
-        let Err(err) = svc.call(req(Scope::Local, Some(Key::Snapshot))).await else {
+        let Err(err) = svc.call(req(RateScope::Local(Key::Snapshot))).await else {
             panic!("expected Throttled once the per-attempt bucket is drained");
         };
         assert!(
@@ -472,27 +472,43 @@ mod tests {
             rate_cfg(),
         )
         .expect("total config");
-        // `tokio::spawn` needs `F::Output: Send`, but the opaque `HttpClient::Body`
-        // carries no `Send` bound (`HttpClient::Body: http_body::Body<..>` only),
-        // so a real response body need not be `Send`. `spawn_local` under a
-        // `LocalSet` drives the same concurrent interleaving (task registers the
-        // sleep, then the timer fires it) without that bound.
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async move {
-                let waiter =
-                    tokio::task::spawn_local(
-                        async move { svc.call(req(Scope::Global, None)).await },
-                    );
-                tokio::task::yield_now().await; // task registers the inner sleep + the 1s deadline
-                timer.advance(Duration::from_secs(1)); // fire the send-timeout deadline
-                // `let...else` avoids needing `Debug` on the opaque `Ok` type.
-                let Err(err) = waiter.await.unwrap() else {
-                    panic!("expected Timeout once the send deadline fires");
-                };
-                assert!(matches!(err, HttpError::Timeout));
-            })
-            .await;
+        // The `impl HttpClient<Body: Send>` return bound (M5) makes `call`'s output
+        // `Send`, so a plain `tokio::spawn` drives the concurrent interleaving (the
+        // task registers the inner sleep, then the timer fires it) — no `LocalSet`/
+        // `spawn_local` workaround needed.
+        let waiter = tokio::spawn(async move { svc.call(req(RateScope::Global)).await });
+        tokio::task::yield_now().await; // task registers the inner sleep + the 1s deadline
+        timer.advance(Duration::from_secs(1)); // fire the send-timeout deadline
+        // `let...else` avoids needing `Debug` on the opaque `Ok` type.
+        let Err(err) = waiter.await.unwrap() else {
+            panic!("expected Timeout once the send deadline fires");
+        };
+        assert!(matches!(err, HttpError::Timeout));
+    }
+
+    // M5: the composed client's response `Body` is `Send`, so a whole response —
+    // and its body — moves into `tokio::spawn` and drains there. This is exactly
+    // the property the old `spawn_local` workaround existed to sidestep.
+    #[tokio::test]
+    async fn response_body_is_send_and_crosses_spawn() {
+        let timer = MockTimer::new();
+        let leaf = ScriptLeaf::new(timer.clone(), vec![Step::Status(200)]);
+        let svc = stack(
+            leaf,
+            http_cfg(1, Duration::from_secs(30), Duration::ZERO),
+            timer,
+            NoAuth,
+            rate_cfg(),
+        )
+        .expect("total config");
+        let resp = svc.call(req(RateScope::Global)).await.expect("200");
+        // Move the response (Body: Send) into a spawned task and collect it there.
+        let body = tokio::spawn(async move { resp.into_body().collect().await })
+            .await
+            .unwrap()
+            .expect("body collects")
+            .to_bytes();
+        assert_eq!(body, Bytes::from_static(b"ok"));
     }
 
     // 4. Auth re-stamps per attempt — inside Retry, so each of the N attempts
@@ -510,7 +526,7 @@ mod tests {
         )
         .expect("total config");
         let resp = svc
-            .call(req(Scope::Global, None))
+            .call(req(RateScope::Global))
             .await
             .expect("third attempt is 200");
         assert_eq!(resp.status(), http::StatusCode::OK);
@@ -589,7 +605,7 @@ mod tests {
             );
         }
         let resp = svc
-            .call(req(Scope::Global, None))
+            .call(req(RateScope::Global))
             .await
             .expect("breaker stayed Closed after local throttles");
         assert_eq!(resp.status(), http::StatusCode::OK);
