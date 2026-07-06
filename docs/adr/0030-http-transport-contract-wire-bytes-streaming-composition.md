@@ -142,6 +142,19 @@ stack.
 > from the per-attempt `Timeout` layer). See
 > [the hyper-backend design](../superpowers/specs/2026-07-05-net-http-hyper-backend-design.md).
 
+> **Amendment (2026-07-06, Tier-1 remediation).** The §7 amendment above hard-wired
+> `webpki-roots` and `https_or_http()`, which (a) cannot reach IBKR's **self-signed
+> localhost Client Portal gateway** — the very target ADR-0031 grounds on — and (b)
+> silently permits cleartext `http://`. `ConnConfig` therefore gains: a `tls_trust:
+> TlsTrust` selector (`WebpkiRoots` default, or `CustomRoots(Vec<CertificateDer>)`
+> for a pinned self-signed venue cert); `allow_http: bool` (**default `false`** —
+> HTTPS-only; plaintext is explicit opt-in); and HTTP/2 keepalive-PING knobs
+> (`http2_keep_alive_interval`/`_timeout`/`_while_idle`, `None` interval = disabled)
+> so idle multiplexed connections to a long-lived venue are not silently reaped.
+> `net-http-hyper` gains `rustls` as a direct (non-dev) dependency for the custom-root
+> `ClientConfig`. See the
+> [deep-review](../superpowers/plans/2026-07-06-net-http-deep-review.md) §2A.
+
 ### 8. Default assembled stack, data config, three-tier override
 
 `oath-adapter-net-http-hyper` ships the canonical stack behind a data-driven

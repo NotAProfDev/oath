@@ -161,6 +161,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and GitHub CLI features, plus automatic git hook activation.
 - Pre-commit hook: `cargo fmt --check` and `cargo clippy -D warnings`.
 - Dual license: MIT OR Apache-2.0.
+- **net-http (hyper leaf):** `ConnConfig` gains configurable TLS trust anchors
+  (`TlsTrust::{WebpkiRoots, CustomRoots}`) so the leaf can reach a self-signed venue
+  gateway (e.g. IBKR Client Portal); an `allow_http` flag defaulting to **HTTPS-only**
+  (plaintext is now explicit opt-in); and HTTP/2 keepalive-PING knobs. `net-http-hyper`
+  now depends on `rustls` directly (was dev-only).
 
 ### Fixed
 
