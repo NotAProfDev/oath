@@ -3,8 +3,9 @@
 //! Opens one `tracing` span per logical request and attaches it to the inner
 //! future via [`Instrument`], so every event the inner
 //! stack emits — including [`Retry`](crate::Retry)'s per-attempt events — nests
-//! under it. The span records method, route (path only — the query is dropped),
-//! status **xor** [`ErrorKind`], latency, and
+//! under it. The span records method, route (a low-cardinality
+//! [`RouteTemplate`](crate::RouteTemplate) if the adapter stamped one, else the
+//! path — the query is always dropped), status **xor** [`ErrorKind`], latency, and
 //! (via `Retry`) attempt count — the ADR-0014 Telemetry plane. **Secret-safe by
 //! construction:** it reads only method, path, status, `ErrorKind`, and the
 //! clock — never headers, never the body. **Body-transparent:** the response is
@@ -119,13 +120,21 @@ where
         req: http::Request<Bytes>,
     ) -> impl Future<Output = Result<Self::Response, HttpError>> + Send {
         async move {
-            // Record method + path (path ONLY — never the query, which can carry
-            // tokens, ADR-0031 §6). Both borrow `req` only for the macro, so `req` is
-            // free to move into the inner call below.
+            // Record method + route. The route is the low-cardinality `RouteTemplate`
+            // the adapter stamped, else the raw path (path ONLY — never the query,
+            // which can carry tokens, ADR-0031 §6). Both borrow `req` only for the
+            // macro, so `req` is free to move into the inner call below.
+            let route = req
+                .extensions()
+                .get::<crate::meter::RouteTemplate>()
+                .map_or_else(
+                    || std::borrow::Cow::Borrowed(req.uri().path()),
+                    |t| t.0.clone(),
+                );
             let span = tracing::info_span!(
                 "http.request",
                 method = %req.method(),
-                route = %req.uri().path(),
+                route = %route,
                 status = Empty,
                 error_kind = Empty,
                 latency_us = Empty,
@@ -426,6 +435,27 @@ mod tests {
         assert_eq!(
             store.span_fields.get("status").map(String::as_str),
             Some("200")
+        );
+        drop(store);
+    }
+
+    #[tokio::test]
+    async fn route_uses_the_low_cardinality_template_when_stamped() {
+        // A stamped RouteTemplate replaces the raw ID-bearing path, so a span→metrics
+        // exporter sees a bounded `route` label (deep review §2C).
+        let (store, _guard) = capture();
+        let svc = TracingLayer::new(MockTimer::new()).layer(OkLeaf);
+        let mut req = get("/iserver/account/DU123/order/456");
+        req.extensions_mut()
+            .insert(crate::RouteTemplate::from_static(
+                "/iserver/account/{id}/order/{id}",
+            ));
+        svc.call(req).await.expect("ok");
+        let store = store.lock().unwrap();
+        assert_eq!(
+            store.span_fields.get("route").map(String::as_str),
+            Some("/iserver/account/{id}/order/{id}"),
+            "the template, not the raw path"
         );
         drop(store);
     }

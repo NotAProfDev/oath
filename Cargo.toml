@@ -95,6 +95,13 @@ tracing = { version = "0.1", default-features = false, features = ["std"] }
 tracing-subscriber = { version = "0.3", default-features = false, features = [
   "registry",
 ] }
+# Runtime-neutral metrics facade (ADR-0014 Telemetry plane): the crate emits
+# counters/histograms; the downstream binary installs the recorder/exporter.
+metrics = "0.24"
+# Dev-only: capture emitted metrics in tests (DebuggingRecorder + Snapshotter).
+metrics-util = { version = "0.20", default-features = false, features = [
+  "debugging",
+] }
 proptest = "1"
 serde_json = "1"
 hyper = { version = "1", features = ["client", "http1", "http2"] }

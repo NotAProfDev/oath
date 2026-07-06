@@ -268,6 +268,9 @@ where
             let eligible = req.extensions().get::<Retryable>().is_some();
             let max = self.cfg.max_attempts.get();
             let mut attempt: u32 = 1;
+            // Bounded route label for the retry-amplification metrics (computed once;
+            // `req` is moved into the terminal send below).
+            let route = crate::meter::route_label(&req);
             // `Request<Bytes>` is `Clone` (`http::Extensions` requires it on insert;
             // `Bytes` is a cheap refcount bump and the directives ride along), and
             // `Auth`/`RateLimit` re-run inside this call so credentials/budget
@@ -300,6 +303,10 @@ where
                 drop(outcome); // release the prior response's Guarded permit before waiting
                 let ceil = backoff_ceiling(self.cfg.base, self.cfg.cap, attempt);
                 let delay = self.rng.duration_in(ceil);
+                // One retry is now committed (a send beyond the first): count it and
+                // record its backoff — the retry-amplification signals (deep review §2C).
+                crate::meter::retry_attempt(route.clone());
+                crate::meter::backoff(route.clone(), delay);
                 tracing::event!(
                     tracing::Level::DEBUG,
                     attempt = u64::from(attempt),

@@ -20,6 +20,9 @@
 //!   `RequestTimeout` per-request override
 //! - [`trace`] — the `Tracing` layer and its `TracingLayer` factory (outermost;
 //!   one span per request, secret-safe, routed to the ADR-0014 Telemetry plane)
+//! - [`meter`] — numeric resilience metrics (breaker transitions, `Throttled`
+//!   rejections, retry attempts/backoff, permit-wait) and the `RouteTemplate`
+//!   cardinality seam, via the runtime-neutral `metrics` facade
 //! - [`stack()`] — `HttpConfig` and the `stack()` assembly composing the canonical
 //!   resilience order (ADR-0031 §1) over any leaf (Slice 2)
 //!
@@ -33,6 +36,7 @@ pub mod circuit_breaker;
 pub mod client;
 mod clock;
 pub mod error;
+pub mod meter;
 pub mod rate;
 pub mod rate_limit;
 pub mod retry;
@@ -46,6 +50,7 @@ pub use body::{BufferMode, Guarded, ResponseBody};
 pub use circuit_breaker::{CircuitBreaker, CircuitBreakerConfig, CircuitBreakerLayer};
 pub use client::HttpClient;
 pub use error::{BoxError, HttpError};
+pub use meter::RouteTemplate;
 pub use rate::{
     BuildError, LimitDecl, LimitPolicy, RateKey, RateLimitConfig, validate_concurrency_singleton,
     validate_coverage,
