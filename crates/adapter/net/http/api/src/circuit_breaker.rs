@@ -4,8 +4,10 @@
 //! `RateLimit` tries never to hit a 429; `CircuitBreaker` stops cold if the host
 //! fails anyway. It trips **Open** after [`CircuitBreakerConfig::failure_threshold`]
 //! consecutive transport failures (`HttpError::{Connection, Timeout}` or a `5xx`
-//! response), or **immediately** on a `Throttled`/429 with the long
-//! [`CircuitBreakerConfig::throttle_cooldown`] (IBKR's ~15-minute penalty box).
+//! response), or **immediately** on a venue **429 response** with the long
+//! [`CircuitBreakerConfig::throttle_cooldown`] (IBKR's ~15-minute penalty box). A
+//! `Throttled` *error* is a local pacing decision (the request was never sent) and
+//! is ignored — it never trips the breaker.
 //! While Open it **fast-rejects** every request with a non-retryable
 //! [`HttpError::CircuitOpen`] — the inner stack is
 //! never touched. After the cooldown a bounded number of **Half-Open** probes test
@@ -51,7 +53,8 @@ pub struct CircuitBreakerConfig {
 pub(crate) enum Class {
     /// A genuine transport/server failure — advances the Closed trip counter.
     Failure,
-    /// A throttle/429 — trips the circuit **immediately** on the long cooldown.
+    /// A venue **429 response** — trips the circuit **immediately** on the long
+    /// cooldown. (A `Throttled` *error* is a local decision and never reaches here.)
     TripNow,
     /// Neither a failure nor a trip (4xx, `Auth`, unclassified) — a no-op in Closed;
     /// resolves a Half-Open probe (a reached host proves recovery).
@@ -63,12 +66,13 @@ pub(crate) enum Class {
 /// Classify a call outcome for the breaker (ADR-0031 §5).
 ///
 /// Genuine transport failures (`Connection`/`Timeout`), the error-side `Server`
-/// kind, and `5xx` responses are all `Failure`; `Throttled`/429 is `TripNow`; a
-/// `4xx`/`Auth`/unclassified error is `Ignored` (never trips **and never
-/// resets** — so an interleave cannot mask a building outage); `2xx`/`3xx` is
-/// `Success`. `Unknown → Ignored` is the conservative v1 default (the
-/// resilience4j fail-safe `Unknown → Failure` is a documented future
-/// improvement).
+/// kind, and `5xx` responses are all `Failure`; a venue **429 response** is
+/// `TripNow`; a `4xx`/`Auth`/`Throttled`/unclassified **error** is `Ignored` — a
+/// `Throttled` error is a local pacing decision that never reached the host
+/// (ADR-0031 §5), and `Ignored` never trips **and never resets**, so an interleave
+/// cannot mask a building outage; `2xx`/`3xx` is `Success`. `Unknown → Ignored` is
+/// the conservative v1 default (the resilience4j fail-safe `Unknown → Failure` is a
+/// documented future improvement).
 pub(crate) fn classify<B>(outcome: &Result<http::Response<B>, HttpError>) -> Class {
     match outcome {
         Err(e) => match e.kind() {
@@ -76,9 +80,12 @@ pub(crate) fn classify<B>(outcome: &Result<http::Response<B>, HttpError>) -> Cla
             // defensive: no HttpError maps here today, but keeps classify total if
             // kind() widens.
             ErrorKind::Connection | ErrorKind::Timeout | ErrorKind::Server => Class::Failure,
-            ErrorKind::Throttled => Class::TripNow,
-            // Auth, Client, Unknown, CircuitOpen — and any future kind — are Ignored
-            // (no HttpError maps to Client either today; same defensive rationale).
+            // A `Throttled` *error* is a purely LOCAL pacing decision (RateLimit's
+            // max_wait breach / fail-closed reject) — the request never reached the
+            // host, so it carries zero host-health signal and must NOT trip the
+            // breaker. Only a real venue 429 *response* (the Ok-side arm) trips
+            // (ADR-0031 §5, clarified). Throttled/Auth/Client/Unknown/CircuitOpen —
+            // and any future kind — are therefore Ignored.
             _ => Class::Ignored,
         },
         Ok(resp) => {
@@ -446,8 +453,12 @@ mod classify_tests {
     }
 
     #[test]
-    fn throttle_and_429_trip_now() {
-        assert_eq!(classify::<()>(&Err(HttpError::Throttled)), Class::TripNow);
+    fn only_a_429_response_trips_now_not_a_local_throttled_error() {
+        // A `Throttled` *error* is produced only locally by RateLimit (max_wait /
+        // fail-closed reject) — the request never reached the host, so it carries
+        // no host-health signal and must be Ignored, never TripNow (ADR-0031 §5).
+        assert_eq!(classify::<()>(&Err(HttpError::Throttled)), Class::Ignored);
+        // A real venue 429 *response* still trips.
         assert_eq!(classify(&ok(429)), Class::TripNow);
     }
 
