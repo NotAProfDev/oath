@@ -44,6 +44,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `RateLimit` releases a concurrency permit at `call`-return for
   `BufferMode::Buffer` responses instead of letting it ride the in-memory body until
   the caller drains it (M4). No external users (pre-release).
+- **net-http performance (hot path).** `RateLimit::acquire` collects its ≤2 buckets
+  into fixed slots instead of two per-request `Vec`s — no allocation on the pacing
+  path (M8). `Retry` clones the request only when another attempt may follow; the
+  terminal or only send moves the owned request (L2). `SplitMix64::clone` now
+  decorrelates — a cloned `Retry` service draws a divergent jitter stream rather
+  than replaying the parent's, so the ADR's clone-per-task pattern no longer
+  synchronizes backoff across tasks (L3). Behaviour-preserving; no API change.
 
 ### Added
 

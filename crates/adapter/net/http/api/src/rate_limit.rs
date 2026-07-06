@@ -222,44 +222,36 @@ where
             RateScope::Both(key) => (true, Some(key)),
         };
 
-        // Collect applicable buckets, rate-type first (ADR-0031 §3 acquire order).
-        let mut rate: Vec<&Bucket> = Vec::new();
-        let mut conc: Vec<&Bucket> = Vec::new();
         let deadline = crate::clock::deadline(self.timer.now(), self.max_wait);
 
-        // global first, then local
-        if want_global {
-            push_bucket(&self.state.global, &mut rate, &mut conc);
-        }
-        if let Some(key) = key {
+        // At most two buckets apply (global and/or local). Collect them into fixed
+        // slots — global first — so acquisition needs no per-request allocation (M8).
+        let global = want_global.then_some(&self.state.global);
+        let local = match key {
             // Fail-closed: a `Local`/`Both` key with no local bucket (e.g. a
             // GlobalOnly endpoint) cannot be paced and must not be sent unthrottled.
-            let bucket = self.state.local.get(key).ok_or(HttpError::Throttled)?;
-            push_bucket(bucket, &mut rate, &mut conc);
-        }
+            Some(key) => Some(self.state.local.get(key).ok_or(HttpError::Throttled)?),
+            None => None,
+        };
+        let buckets = [global, local];
 
-        // A rate token spent here is not refunded if a later phase throttles;
-        // over-pacing is the safe direction (never a 429).
-        for bucket in rate {
-            acquire_rate(bucket, &self.timer, deadline).await?;
+        // Rate-then-concurrency acquire order (ADR-0031 §3). A rate token spent here
+        // is not refunded if a later phase throttles; over-pacing is the safe
+        // direction (never a 429).
+        for bucket in buckets.into_iter().flatten() {
+            if let Bucket::Rate { .. } = bucket {
+                acquire_rate(bucket, &self.timer, deadline).await?;
+            }
         }
+        // `validate_concurrency_singleton` guarantees at most one concurrency bucket
+        // per acquire, so the single held permit is unambiguous.
         let mut held = None;
-        for bucket in conc {
-            debug_assert!(
-                held.is_none(),
-                "validate_concurrency_singleton guarantees at most one concurrency bucket per acquire"
-            );
-            held = Some(acquire_conc(bucket, &self.timer, deadline).await?);
+        for bucket in buckets.into_iter().flatten() {
+            if let Bucket::Concurrency(_) = bucket {
+                held = Some(acquire_conc(bucket, &self.timer, deadline).await?);
+            }
         }
         Ok(held)
-    }
-}
-
-/// Route a bucket into the rate-first / concurrency-second acquire lists.
-fn push_bucket<'a>(bucket: &'a Bucket, rate: &mut Vec<&'a Bucket>, conc: &mut Vec<&'a Bucket>) {
-    match bucket {
-        Bucket::Rate { .. } => rate.push(bucket),
-        Bucket::Concurrency(_) => conc.push(bucket),
     }
 }
 

@@ -60,6 +60,10 @@ pub struct RetryConfig {
 /// `AtomicU64::fetch_add`, so `duration_in` takes `&self` and holds **no** lock
 /// across the backoff `await` (the future stays `Send`). Not cryptographic —
 /// full-jitter backoff needs a spread, not uniformity guarantees.
+///
+/// `Clone` **decorrelates**: a clone is seeded from the parent's advanced+finalized
+/// state, not a snapshot, so the ADR's clone-per-task concurrency pattern does not
+/// replay identical backoff across tasks (L3).
 #[derive(Debug)]
 pub(crate) struct SplitMix64 {
     state: AtomicU64,
@@ -67,10 +71,15 @@ pub(crate) struct SplitMix64 {
 
 impl Clone for SplitMix64 {
     fn clone(&self) -> Self {
-        // Snapshot the current state — a cloned generator continues the sequence.
-        Self {
-            state: AtomicU64::new(self.state.load(Ordering::Relaxed)),
-        }
+        // Decorrelate clones (L3): advance the parent one step and seed the child
+        // from the *finalized* result, so two clones of one generator (the per-task
+        // pattern) diverge instead of replaying the same sequence. Still no `rand`
+        // dependency — the perturbation is one `SplitMix64` step + finalizer.
+        let advanced = self
+            .state
+            .fetch_add(Self::STEP, Ordering::Relaxed)
+            .wrapping_add(Self::STEP);
+        Self::new(Self::finalize(advanced))
     }
 }
 
@@ -85,17 +94,22 @@ impl SplitMix64 {
         }
     }
 
+    /// The `SplitMix64` output finalizer — a fixed bijective bit-mix.
+    const fn finalize(mut z: u64) -> u64 {
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        z ^ (z >> 31)
+    }
+
     /// Advance the state and return the next 64-bit draw (`SplitMix64` finalizer).
     fn next_u64(&self) -> u64 {
         // `fetch_add` returns the *old* state; add STEP to get the new one — so a
         // fresh generator's first draw finalizes `seed + STEP`, as the reference does.
-        let mut z = self
+        let z = self
             .state
             .fetch_add(Self::STEP, Ordering::Relaxed)
             .wrapping_add(Self::STEP);
-        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-        z ^ (z >> 31)
+        Self::finalize(z)
     }
 
     /// A uniform `Duration` in `[0, ceil]` — one full-jitter sample.
@@ -210,6 +224,25 @@ fn backoff_ceiling(base: Duration, cap: Duration, attempt: u32) -> Duration {
     base.checked_mul(factor).unwrap_or(cap).min(cap)
 }
 
+/// Emit the per-attempt debug event — nests under Tracing's span when present, a
+/// no-op otherwise (ADR-0031 §6). `debug`: drill-down, pay-per-use.
+fn record_attempt<B>(outcome: &Result<http::Response<B>, HttpError>, attempt: u32) {
+    match outcome {
+        Ok(resp) => tracing::event!(
+            tracing::Level::DEBUG,
+            attempt = u64::from(attempt),
+            status = u64::from(resp.status().as_u16()),
+            "http.attempt"
+        ),
+        Err(e) => tracing::event!(
+            tracing::Level::DEBUG,
+            attempt = u64::from(attempt),
+            error_kind = crate::trace::kind_label(e.kind()),
+            "http.attempt"
+        ),
+    }
+}
+
 impl<S, T, B> Service<http::Request<Bytes>> for Retry<S, T>
 where
     S: Service<http::Request<Bytes>, Response = http::Response<B>, Error = HttpError> + Sync,
@@ -235,41 +268,34 @@ where
             let eligible = req.extensions().get::<Retryable>().is_some();
             let max = self.cfg.max_attempts.get();
             let mut attempt: u32 = 1;
-            // Whole-request clone per attempt: `http::Extensions` requires
-            // `Clone` on insert, so `Request<Bytes>` is `Clone` (Bytes is a
-            // cheap refcount bump; the directives ride along). `Auth`/`RateLimit`
-            // re-run inside this call, so credentials/budget refresh for free.
+            // `Request<Bytes>` is `Clone` (`http::Extensions` requires it on insert;
+            // `Bytes` is a cheap refcount bump and the directives ride along), and
+            // `Auth`/`RateLimit` re-run inside this call so credentials/budget
+            // refresh per attempt. The clone is made only when another attempt may
+            // follow — the terminal or only send moves the owned request (L2).
             loop {
-                // Whole-request clone per attempt (see the existing note above this loop).
-                let outcome = self.inner.call(req.clone()).await;
-                // Per-attempt telemetry — nests under Tracing's span when present,
-                // a no-op otherwise (ADR-0031 §6). `debug`: drill-down, pay-per-use.
-                match &outcome {
-                    Ok(resp) => tracing::event!(
-                        tracing::Level::DEBUG,
-                        attempt = u64::from(attempt),
-                        status = u64::from(resp.status().as_u16()),
-                        "http.attempt"
-                    ),
-                    Err(e) => tracing::event!(
-                        tracing::Level::DEBUG,
-                        attempt = u64::from(attempt),
-                        error_kind = crate::trace::kind_label(e.kind()),
-                        "http.attempt"
-                    ),
-                }
-                let retry = eligible
-                    && attempt < max
-                    && match &outcome {
-                        Err(e) => is_transient(e.kind()),
-                        Ok(resp) => resp.status().is_server_error(), // 5xx only; 429 is 4xx
-                    };
-                if !retry {
+                let may_retry = eligible && attempt < max;
+                if !may_retry {
+                    // Terminal send: no further attempt is possible (ineligible, last
+                    // attempt, or `max == 1`), so move the owned request — no clone (L2).
+                    let outcome = self.inner.call(req).await;
+                    record_attempt(&outcome, attempt);
                     // Record the final attempt count onto the current span — the
                     // "http.request" span when composed under Tracing; a no-op
                     // otherwise (no active span / the field is absent).
                     tracing::Span::current().record("attempts", u64::from(attempt));
                     return outcome; // success, non-retryable outcome, or attempts exhausted
+                }
+                // Another attempt may follow — clone so `req` survives for a retry.
+                let outcome = self.inner.call(req.clone()).await;
+                record_attempt(&outcome, attempt);
+                let retry = match &outcome {
+                    Err(e) => is_transient(e.kind()),
+                    Ok(resp) => resp.status().is_server_error(), // 5xx only; 429 is 4xx
+                };
+                if !retry {
+                    tracing::Span::current().record("attempts", u64::from(attempt));
+                    return outcome; // success or a non-retryable verdict
                 }
                 drop(outcome); // release the prior response's Guarded permit before waiting
                 let ceil = backoff_ceiling(self.cfg.base, self.cfg.cap, attempt);
@@ -594,6 +620,82 @@ mod tests {
         assert_eq!(leaf.calls(), 3, "exactly max_attempts sends");
     }
 
+    // A request extension that counts how often the request is cloned: every
+    // `Request::clone()` clones each extension, so a custom (non-derived) `Clone`
+    // that bumps a shared counter observes exactly Retry's per-attempt clones (L2).
+    struct CloneCounter(Arc<AtomicUsize>);
+    impl Clone for CloneCounter {
+        fn clone(&self) -> Self {
+            self.0.fetch_add(1, Ordering::Relaxed);
+            Self(Arc::clone(&self.0))
+        }
+    }
+
+    fn counted(eligible: bool) -> (http::Request<Bytes>, Arc<AtomicUsize>) {
+        let counter = Arc::new(AtomicUsize::new(0));
+        let mut r = req(eligible);
+        r.extensions_mut()
+            .insert(CloneCounter(Arc::clone(&counter)));
+        (r, counter)
+    }
+
+    #[tokio::test]
+    async fn terminal_send_moves_the_request_without_cloning() {
+        // Ineligible ⇒ exactly one (terminal) send: the owned request is moved, not
+        // cloned, even though `max_attempts` is 3 (L2).
+        let (r, counter) = counted(false);
+        let leaf = ScriptLeaf::new(vec![Step::Status(200)]);
+        let svc = RetryLayer::new(
+            cfg(3, Duration::from_millis(1), Duration::from_millis(1)),
+            MockTimer::new(),
+        )
+        .layer(leaf);
+        svc.call(r).await.expect("200");
+        assert_eq!(
+            counter.load(Ordering::Relaxed),
+            0,
+            "the terminal/only send must move the request, not clone it"
+        );
+    }
+
+    #[tokio::test]
+    async fn clones_only_for_attempts_that_may_be_followed() {
+        // Eligible, always-transient, max = 3 ⇒ 3 sends, but only attempts 1 and 2
+        // may be followed by a retry, so exactly 2 clones; attempt 3 moves (L2).
+        let (r, counter) = counted(true);
+        let timer = MockTimer::new();
+        let cap = Duration::from_millis(10);
+        let leaf = ScriptLeaf::new(vec![Step::Err(ErrorKind::Connection)]);
+        let svc = RetryLayer::new(cfg(3, cap, cap), timer.clone()).layer(leaf.clone());
+        let waiter = tokio::spawn(async move { svc.call(r).await });
+        drain(&timer, 4, cap).await;
+        waiter.await.unwrap().unwrap_err();
+        assert_eq!(leaf.calls(), 3, "3 sends");
+        assert_eq!(
+            counter.load(Ordering::Relaxed),
+            2,
+            "cloned before attempts 1 and 2; the 3rd (terminal) send moves"
+        );
+    }
+
+    #[test]
+    fn cloned_retry_services_decorrelate_their_jitter() {
+        // L3: cloning a Retry service (the ADR's per-task pattern) must give the
+        // clone a divergent jitter stream — not a replay of the parent's.
+        let base = RetryLayer::new(
+            cfg(3, Duration::from_millis(50), Duration::from_millis(50)),
+            MockTimer::new(),
+        )
+        .layer(ScriptLeaf::new(vec![Step::Status(200)]));
+        let clone = base.clone();
+        let ceil = Duration::from_millis(50);
+        let differs = (0..64).any(|_| base.rng.duration_in(ceil) != clone.rng.duration_in(ceil));
+        assert!(
+            differs,
+            "a cloned Retry service must not replay the parent's backoff sequence"
+        );
+    }
+
     // `resp`'s body (`Guarded<StubBody>`) holds a `SemaphoreGuardArc`, so clippy
     // flags it as a "significant drop" outliving its last read; the assertions
     // on `resp`/`leaf` after the `await` are exactly the point of this test, so
@@ -708,15 +810,13 @@ mod rng_tests {
     }
 
     #[test]
-    fn clone_snapshots_state_independently() {
+    fn clone_decorrelates_from_its_parent() {
+        // L3: a cloned generator must NOT replay its parent's sequence — otherwise
+        // the ADR's clone-per-task pattern synchronizes backoff across tasks.
         let a = SplitMix64::new(99);
+        let b = a.clone();
         let ceil = Duration::from_millis(50);
-        let _ = a.duration_in(ceil); // advance `a`
-        let b = a.clone(); // `b` continues from `a`'s current state
-        assert_eq!(
-            a.duration_in(ceil),
-            b.duration_in(ceil),
-            "clone snapshots the state"
-        );
+        let differs = (0..64).any(|_| a.duration_in(ceil) != b.duration_in(ceil));
+        assert!(differs, "a clone must diverge from its parent's sequence");
     }
 }
