@@ -331,11 +331,14 @@ where
         req: http::Request<Bytes>,
     ) -> impl Future<Output = Result<Self::Response, HttpError>> + Send {
         async move {
+            let route = crate::meter::route_label(&req);
             // Absent directive fails closed (ADR-0034 Amendment #1): a forgotten
             // stamp must never fly unpaced or global-only, silently skipping the
             // endpoint's own local limit. "Global only" is an explicit
-            // RateScope::Global.
+            // RateScope::Global. A fail-closed reject is a local pacing rejection —
+            // count it (it is the most likely real-world C1 trigger).
             let Some(directive) = req.extensions().get::<RateScope<K>>().cloned() else {
+                crate::meter::throttled(route);
                 return Err(HttpError::Throttled);
             };
             // M4 (ADR-0034 §2): a buffered response is fully transferred by the time
@@ -345,7 +348,16 @@ where
                 req.extensions().get::<BufferMode>(),
                 Some(BufferMode::Buffer)
             );
-            let permit = self.acquire(&directive).await?;
+            let started = self.timer.now();
+            let permit = match self.acquire(&directive).await {
+                Ok(permit) => permit,
+                // A local pacing rejection — the request was never sent (deep review §2C).
+                Err(err) => {
+                    crate::meter::throttled(route);
+                    return Err(err);
+                },
+            };
+            crate::meter::permit_wait(route, self.timer.now().saturating_duration_since(started));
             let resp = self.inner.call(req).await?;
             let (parts, body) = resp.into_parts();
             let permit = if buffered { None } else { permit };
@@ -542,6 +554,39 @@ mod tests {
         for _ in 0..100 {
             svc.call(req(RateScope::None)).await.expect("unlimited");
         }
+    }
+
+    #[test]
+    fn a_throttled_request_emits_the_throttled_metric() {
+        use futures_util::FutureExt;
+        use metrics_util::debugging::{DebugValue, DebuggingRecorder};
+        let recorder = DebuggingRecorder::new();
+        let snap = recorder.snapshotter();
+        metrics::with_local_recorder(&recorder, || {
+            let svc = layer(MockTimer::new(), Duration::from_secs(0)).layer(Leaf::ok(b"ok"));
+            // Snapshot burst = 2: two pass, the third is a local pacing rejection.
+            // MockTimer + max_wait = 0 resolve synchronously, so `now_or_never` drives it.
+            svc.call(req(RateScope::Local(Key::Snapshot)))
+                .now_or_never()
+                .expect("sync")
+                .unwrap();
+            svc.call(req(RateScope::Local(Key::Snapshot)))
+                .now_or_never()
+                .expect("sync")
+                .unwrap();
+            svc.call(req(RateScope::Local(Key::Snapshot)))
+                .now_or_never()
+                .expect("sync")
+                .unwrap_err();
+        });
+        let throttled = snap.snapshot().into_vec().into_iter().any(|(k, _, _, v)| {
+            k.key().name() == "http_rate_limit_throttled_total"
+                && matches!(v, DebugValue::Counter(n) if n >= 1)
+        });
+        assert!(
+            throttled,
+            "a local pacing rejection emits the throttled counter"
+        );
     }
 
     #[tokio::test]

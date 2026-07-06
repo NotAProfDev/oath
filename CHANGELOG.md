@@ -54,6 +54,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **net-http numeric telemetry (ADR-0014 Telemetry plane).** The resilience stack
+  now emits counters/histograms through the runtime-neutral `metrics` facade
+  (downstream installs the recorder/exporter; a no-op with none installed):
+  circuit-breaker phase transitions (`http_circuit_breaker_transitions_total{to}`),
+  local pacing rejections (`http_rate_limit_throttled_total{route}`), retry attempts
+  and backoff (`http_retry_attempts_total{route}`, `http_retry_backoff_seconds`),
+  and pacing permit-wait (`http_rate_limit_permit_wait_seconds{route}`). Cardinality
+  is bounded by a new `RouteTemplate` request extension (a low-cardinality route the
+  adapter stamps, e.g. `/iserver/account/{id}/order/{id}`) — also used for the
+  `Tracing` span's `route`, so ID-bearing paths no longer explode label cardinality.
+  (ADR-0014 amended.)
 - `oath-adapter-net-http-api` HTTP contract — `HttpError` (one concrete
   transport/middleware error; HTTP statuses pass through as `Ok(Response)`),
   `HttpClient` (blanket-impl'd `Service` sub-trait), `ResponseBody` (buffer-xor-

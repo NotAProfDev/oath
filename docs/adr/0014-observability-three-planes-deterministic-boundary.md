@@ -52,3 +52,18 @@ three planes directly and **never re-fold**.
   Business State coalesces (latest wins); Domain Events must not be lost.
 - The mechanism that delivers Business State, Domain Events, and query responses
   **without touching the writer thread** is ADR-0015.
+
+## Amendment (2026-07-06): net adapter Telemetry emission
+
+The network adapter (`net-http`) emits its numeric **Telemetry** — circuit-breaker
+phase transitions, local pacing (`Throttled`) rejections, retry attempts and
+backoff, and pacing permit-wait — through the runtime-neutral
+[`metrics`](https://docs.rs/metrics) facade, not `tracing` spans alone. This keeps
+the contract crate `oath-adapter-net-api` runtime-neutral (ADR-0029): the crate only
+*emits*; the **downstream process binary installs the recorder/exporter**
+(Prometheus/OTel/…), and with no recorder installed every emit is a cheap no-op.
+Consistent with the plane split above — this Telemetry is wall-clock, per-process,
+out-of-fold, and loss-acceptable; it never crosses the deterministic boundary or
+touches canonical state. Label cardinality is bounded: the only per-request label is
+an adapter-stamped `RouteTemplate` (e.g. `/iserver/account/{id}/order/{id}`), never
+the raw ID-bearing path.

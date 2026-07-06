@@ -133,6 +133,35 @@ pub(crate) enum Admit {
     Reject,
 }
 
+/// A label-only view of the breaker's phase for telemetry (deep review §2C) — the
+/// discriminant of [`BreakerState`] without its payload, so it is `Copy` and stable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Phase {
+    /// Passing traffic.
+    Closed,
+    /// Fast-rejecting.
+    Open,
+    /// Probing.
+    HalfOpen,
+}
+
+impl Phase {
+    /// The stable, low-cardinality telemetry label.
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Closed => "closed",
+            Self::Open => "open",
+            Self::HalfOpen => "half_open",
+        }
+    }
+}
+
+/// The label for a phase change, or `None` when the phase is unchanged — the shell
+/// emits a `http_circuit_breaker_transitions_total{to}` count for each `Some`.
+fn transition_label(before: Phase, after: Phase) -> Option<&'static str> {
+    (before != after).then(|| after.label())
+}
+
 /// The pure circuit-breaker state machine (ADR-0031 §5).
 ///
 /// Clock-injected: every transition takes `now: Instant` as an input, so the whole
@@ -263,6 +292,15 @@ impl Breaker {
             };
         }
     }
+
+    /// The current [`Phase`] — a pure, clock-free, label-only view for telemetry.
+    pub(crate) const fn phase(&self) -> Phase {
+        match self.state {
+            BreakerState::Closed { .. } => Phase::Closed,
+            BreakerState::Open { .. } => Phase::Open,
+            BreakerState::HalfOpen { .. } => Phase::HalfOpen,
+        }
+    }
 }
 
 /// The `CircuitBreaker` [`Layer`] factory: holds the single shared breaker + clock.
@@ -375,11 +413,18 @@ impl<T: Timer> Drop for ProbeGuard<'_, T> {
     fn drop(&mut self) {
         if self.armed {
             let now = self.timer.now();
-            let mut breaker = self
-                .breaker
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            breaker.on_abandoned_probe(now);
+            let transition = {
+                let mut breaker = self
+                    .breaker
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                let before = breaker.phase();
+                breaker.on_abandoned_probe(now);
+                transition_label(before, breaker.phase())
+            };
+            if let Some(to) = transition {
+                crate::meter::breaker_transition(to);
+            }
         }
     }
 }
@@ -400,14 +445,21 @@ where
     ) -> impl Future<Output = Result<Self::Response, HttpError>> + Send {
         async move {
             // Admit decision under a short lock (released at the end of this block).
-            let admit = {
+            // The lazy Open→Half-Open transition is captured here and emitted after
+            // the lock drops, so no metric call happens while the breaker is locked.
+            let (admit, transition) = {
                 let now = self.timer.now();
                 let mut breaker = self
                     .breaker
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner);
-                breaker.admit(now)
+                let before = breaker.phase();
+                let admit = breaker.admit(now);
+                (admit, transition_label(before, breaker.phase()))
             };
+            if let Some(to) = transition {
+                crate::meter::breaker_transition(to);
+            }
             let is_probe = match admit {
                 Admit::Reject => return Err(HttpError::CircuitOpen), // fast reject — leaf untouched
                 Admit::Probe => true,
@@ -425,15 +477,21 @@ where
                 g.disarm(); // completed normally — record the true outcome below
             }
 
-            // Record the classified outcome under a second short lock.
+            // Record the classified outcome under a second short lock; capture any
+            // trip/close/half-open transition and emit it after the lock drops.
             let class = classify(&outcome);
-            {
+            let transition = {
                 let now = self.timer.now();
                 let mut breaker = self
                     .breaker
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner);
+                let before = breaker.phase();
                 breaker.record(class, now);
+                transition_label(before, breaker.phase())
+            };
+            if let Some(to) = transition {
+                crate::meter::breaker_transition(to);
             }
             outcome
         }
@@ -855,6 +913,32 @@ mod service_tests {
             3,
             "an open circuit fast-rejects; the leaf is untouched"
         );
+    }
+
+    #[test]
+    fn tripping_the_breaker_emits_an_open_transition_metric() {
+        use futures_util::FutureExt;
+        use metrics_util::debugging::{DebugValue, DebuggingRecorder};
+        let recorder = DebuggingRecorder::new();
+        let snap = recorder.snapshotter();
+        metrics::with_local_recorder(&recorder, || {
+            // threshold = 1 → the first failure trips Closed→Open. MockTimer + inline
+            // leaf resolve synchronously, so `now_or_never` drives the whole call.
+            let svc = CircuitBreakerLayer::new(cfg(1, secs(30), secs(900), 1), MockTimer::new())
+                .layer(ScriptLeaf::new(vec![Step::Err(ErrorKind::Connection)]));
+            svc.call(bare_req())
+                .now_or_never()
+                .expect("resolves synchronously under MockTimer")
+                .unwrap_err();
+        });
+        let opened = snap.snapshot().into_vec().into_iter().any(|(k, _, _, v)| {
+            k.key().name() == "http_circuit_breaker_transitions_total"
+                && k.key()
+                    .labels()
+                    .any(|l| l.key() == "to" && l.value() == "open")
+                && matches!(v, DebugValue::Counter(n) if n >= 1)
+        });
+        assert!(opened, "a trip emits a to=open transition counter");
     }
 
     #[tokio::test]
