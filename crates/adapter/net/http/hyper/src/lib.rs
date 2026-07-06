@@ -12,5 +12,5 @@ pub mod leaf;
 pub mod timer;
 
 pub use build::build;
-pub use leaf::{ConnConfig, HyperBody, HyperLeaf, hyper_leaf};
+pub use leaf::{ConnConfig, HyperBody, HyperLeaf, TlsTrust, hyper_leaf};
 pub use timer::TokioTimer;

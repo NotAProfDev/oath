@@ -15,6 +15,8 @@ use hyper_util::client::legacy::Client;
 use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::rt::{TokioExecutor, TokioTimer as HyperPoolTimer};
 use oath_adapter_net_http_api::{BufferMode, HttpError, ResponseBody, Service};
+use rustls::RootCertStore;
+use rustls::pki_types::CertificateDer;
 use std::future::Future;
 use std::time::Duration;
 
@@ -24,6 +26,20 @@ use std::time::Duration;
 /// `map_hyper_err` is a named `fn` so the type is nameable in [`HyperLeaf`]'s
 /// associated type.
 pub type HyperBody = MapErr<Incoming, fn(hyper::Error) -> HttpError>;
+
+/// TLS trust anchors for [`hyper_leaf`]'s HTTPS connector.
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub enum TlsTrust {
+    /// Bundled Mozilla roots (`webpki-roots`) — public CAs. The default posture
+    /// for a public venue endpoint.
+    WebpkiRoots,
+    /// Trust **exactly** these DER-encoded certificates and nothing else — e.g.
+    /// IBKR's self-signed Client Portal gateway cert. Public CAs are not trusted
+    /// in this mode. Invalid entries are skipped; a fully-empty trust set then
+    /// fails every handshake as a `Connection` error.
+    CustomRoots(Vec<CertificateDer<'static>>),
+}
 
 /// Connection-pool + connector configuration for [`hyper_leaf`]. Plain data — no
 /// `serde`, no type parameter (like `HttpConfig`); adapters construct it directly.
@@ -36,6 +52,23 @@ pub struct ConnConfig {
     /// Bound on TCP connect + TLS handshake — fails fast on a dead host,
     /// independent of (and tighter than) the per-attempt `Timeout` layer.
     pub connect_timeout: Duration,
+    /// TLS trust anchors: bundled public roots, or a pinned custom set (e.g. a
+    /// self-signed venue gateway).
+    pub tls_trust: TlsTrust,
+    /// Allow plaintext `http://` connections. **Default `false`** (HTTPS-only) so a
+    /// misconfigured base URL cannot silently exfiltrate credentials over
+    /// cleartext; set `true` only for a known-plaintext local gateway.
+    pub allow_http: bool,
+    /// HTTP/2 keepalive PING interval — `None` disables it (hyper's default). Set
+    /// it so idle multiplexed connections to a long-lived venue are not silently
+    /// reaped, at the cost of a periodic PING.
+    pub http2_keep_alive_interval: Option<Duration>,
+    /// How long to wait for a keepalive PING ack before treating the connection as
+    /// dead. Ignored when `http2_keep_alive_interval` is `None`.
+    pub http2_keep_alive_timeout: Duration,
+    /// Send keepalive PINGs even with no active requests. Ignored when
+    /// `http2_keep_alive_interval` is `None`.
+    pub http2_keep_alive_while_idle: bool,
 }
 
 /// The hyper backend leaf. `Clone` (the pool is `Arc`-shared internally), so the
@@ -91,11 +124,9 @@ impl Service<http::Request<Bytes>> for HyperLeaf {
 /// Construct the pooled HTTPS leaf.
 ///
 /// An `HttpConnector` (connect timeout, nodelay) wrapped by a rustls
-/// `HttpsConnector` (aws-lc-rs, webpki-roots, ALPN h2+http/1.1), driven by a
-/// pooled `legacy::Client` on a `TokioExecutor`.
-// `conn`'s fields are all `Copy` and only read here, but the public signature
-// takes it by value to match `stack()`'s "config consumed once at boot" shape.
-#[allow(clippy::needless_pass_by_value)]
+/// `HttpsConnector` (aws-lc-rs, [`ConnConfig::tls_trust`] anchors, ALPN
+/// h2+http/1.1), driven by a pooled `legacy::Client` on a `TokioExecutor`.
+/// HTTPS-only unless [`ConnConfig::allow_http`] is set; optional HTTP/2 keepalive.
 #[must_use]
 pub fn hyper_leaf(conn: ConnConfig) -> HyperLeaf {
     let mut http = HttpConnector::new();
@@ -103,17 +134,36 @@ pub fn hyper_leaf(conn: ConnConfig) -> HyperLeaf {
     http.set_connect_timeout(Some(conn.connect_timeout));
     http.set_nodelay(true);
 
-    let https = hyper_rustls::HttpsConnectorBuilder::new()
-        .with_webpki_roots()
-        .https_or_http()
-        .enable_http1()
-        .enable_http2()
-        .wrap_connector(http);
+    // Trust anchors: bundled public roots, or a pinned custom set (the same rustls
+    // `ClientConfig` shape the TLS test builds by hand).
+    let tls = hyper_rustls::HttpsConnectorBuilder::new();
+    let tls = match conn.tls_trust {
+        TlsTrust::WebpkiRoots => tls.with_webpki_roots(),
+        TlsTrust::CustomRoots(certs) => {
+            let mut roots = RootCertStore::empty();
+            let (_added, _skipped) = roots.add_parsable_certificates(certs);
+            let client_cfg = rustls::ClientConfig::builder()
+                .with_root_certificates(roots)
+                .with_no_client_auth();
+            tls.with_tls_config(client_cfg)
+        },
+    };
+    // HTTPS-only by default; plaintext is opt-in so a stray `http://` cannot leak
+    // credentials in cleartext.
+    let tls = if conn.allow_http {
+        tls.https_or_http()
+    } else {
+        tls.https_only()
+    };
+    let https = tls.enable_http1().enable_http2().wrap_connector(http);
 
     let client = Client::builder(TokioExecutor::new())
         .timer(HyperPoolTimer::new())
         .pool_idle_timeout(conn.pool_idle_timeout)
         .pool_max_idle_per_host(conn.pool_max_idle_per_host)
+        .http2_keep_alive_interval(conn.http2_keep_alive_interval)
+        .http2_keep_alive_timeout(conn.http2_keep_alive_timeout)
+        .http2_keep_alive_while_idle(conn.http2_keep_alive_while_idle)
         .build(https);
 
     HyperLeaf { client }
@@ -121,7 +171,7 @@ pub fn hyper_leaf(conn: ConnConfig) -> HyperLeaf {
 
 #[cfg(test)]
 mod tests {
-    use super::{ConnConfig, HyperLeaf, hyper_leaf};
+    use super::{ConnConfig, HyperLeaf, TlsTrust, hyper_leaf};
     use bytes::Bytes;
     use http_body_util::BodyExt;
     use oath_adapter_net_http_api::Service;
@@ -136,6 +186,13 @@ mod tests {
             pool_max_idle_per_host: 4,
             pool_idle_timeout: Duration::from_secs(30),
             connect_timeout: Duration::from_secs(2),
+            // The plain-HTTP echo/abort/truncate servers in these tests need it;
+            // production defaults to HTTPS-only.
+            tls_trust: TlsTrust::WebpkiRoots,
+            allow_http: true,
+            http2_keep_alive_interval: None,
+            http2_keep_alive_timeout: Duration::from_secs(10),
+            http2_keep_alive_while_idle: false,
         }
     }
 
@@ -367,16 +424,15 @@ mod tests {
         );
     }
 
-    // Full TLS path: rcgen self-signed cert → rustls server on loopback → a
-    // HyperLeaf whose connector trusts exactly that cert. Exercises the real
-    // aws-lc-rs handshake + webpki verification in CI (custom root, not webpki-roots).
+    // Full TLS path THROUGH the production `hyper_leaf`: rcgen self-signed cert →
+    // rustls server on loopback → a leaf built by
+    // `hyper_leaf(TlsTrust::CustomRoots(..))` trusting exactly that cert. Proves the
+    // constructor can reach a self-signed gateway (the IBKR Client Portal case) —
+    // exercising the real aws-lc-rs handshake + webpki verification in CI.
     #[tokio::test]
-    async fn leaf_round_trips_over_tls_with_a_trusted_self_signed_cert() {
-        use hyper_util::client::legacy::Client;
-        use hyper_util::client::legacy::connect::HttpConnector;
-        use hyper_util::rt::{TokioExecutor, TokioIo};
+    async fn hyper_leaf_round_trips_over_tls_with_a_custom_root() {
+        use hyper_util::rt::TokioIo;
         use std::sync::Arc;
-        use tokio::net::TcpListener;
         use tokio_rustls::TlsAcceptor;
 
         // 1. Self-signed cert for "localhost".
@@ -408,29 +464,42 @@ mod tests {
                 .await;
         });
 
-        // 3. Client root store trusting only our self-signed cert.
-        let mut roots = rustls::RootCertStore::empty();
-        roots.add(cert_der).unwrap();
-        let client_cfg = rustls::ClientConfig::builder()
-            .with_root_certificates(roots)
-            .with_no_client_auth();
-
-        let mut http = HttpConnector::new();
-        http.enforce_http(false);
-        let https = hyper_rustls::HttpsConnectorBuilder::new()
-            .with_tls_config(client_cfg)
-            .https_or_http()
-            .enable_http1()
-            .wrap_connector(http);
-        let client = Client::builder(TokioExecutor::new()).build(https);
-        let leaf = HyperLeaf { client };
+        // 3. Build the leaf via the PRODUCTION constructor, trusting only our cert,
+        //    HTTPS-only (as in production).
+        let conn = ConnConfig {
+            tls_trust: TlsTrust::CustomRoots(vec![cert_der]),
+            allow_http: false,
+            ..test_conn()
+        };
+        let leaf = hyper_leaf(conn);
 
         // 4. Round-trip over https://localhost:PORT (SNI/cert CN = localhost).
         let req = http::Request::get(format!("https://localhost:{port}/"))
             .body(Bytes::new())
             .unwrap();
-        let resp = leaf.call(req).await.expect("tls round-trip");
+        let resp = leaf
+            .call(req)
+            .await
+            .expect("tls round-trip via hyper_leaf custom root");
         let body = resp.into_body().collect().await.unwrap().to_bytes();
         assert_eq!(body, Bytes::from_static(b"secure"));
+    }
+
+    #[tokio::test]
+    async fn https_only_rejects_plaintext_http() {
+        // Default posture (`allow_http = false`) must refuse an `http://` URL rather
+        // than send the request (and any credentials) in cleartext.
+        let conn = ConnConfig {
+            allow_http: false,
+            ..test_conn()
+        };
+        let leaf = hyper_leaf(conn);
+        let req = http::Request::get("http://127.0.0.1:9/x")
+            .body(Bytes::new())
+            .unwrap();
+        assert!(
+            leaf.call(req).await.is_err(),
+            "an HTTPS-only leaf must reject a plaintext http:// URL"
+        );
     }
 }
