@@ -31,6 +31,7 @@ pub mod auth;
 pub mod body;
 pub mod circuit_breaker;
 pub mod client;
+mod clock;
 pub mod error;
 pub mod rate;
 pub mod rate_limit;

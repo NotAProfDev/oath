@@ -21,6 +21,7 @@
 //! the next admit), so there is no timer race and no new dependency. Body-transparent
 //! — `http::Response<B>` is forwarded untouched.
 
+use crate::clock::deadline;
 use crate::{HttpError, Service};
 use bytes::Bytes;
 use oath_adapter_net_api::{ErrorKind, HasErrorKind, Layer, Timer};
@@ -193,7 +194,7 @@ impl Breaker {
                     let n = consecutive_failures.saturating_add(1);
                     self.state = if n >= self.cfg.failure_threshold.get() {
                         BreakerState::Open {
-                            reopen_at: now + self.cfg.cooldown,
+                            reopen_at: deadline(now, self.cfg.cooldown),
                         }
                     } else {
                         BreakerState::Closed {
@@ -203,7 +204,7 @@ impl Breaker {
                 },
                 Class::TripNow => {
                     self.state = BreakerState::Open {
-                        reopen_at: now + self.cfg.throttle_cooldown,
+                        reopen_at: deadline(now, self.cfg.throttle_cooldown),
                     };
                 },
                 Class::Ignored => {}, // streak untouched — a 4xx/Auth neither trips nor resets
@@ -219,12 +220,12 @@ impl Breaker {
             } => match class {
                 Class::Failure => {
                     self.state = BreakerState::Open {
-                        reopen_at: now + self.cfg.cooldown,
+                        reopen_at: deadline(now, self.cfg.cooldown),
                     };
                 },
                 Class::TripNow => {
                     self.state = BreakerState::Open {
-                        reopen_at: now + self.cfg.throttle_cooldown,
+                        reopen_at: deadline(now, self.cfg.throttle_cooldown),
                     };
                 },
                 // A reached-host probe (2xx/3xx or 4xx/Auth) resolves; the last one closes.
@@ -258,7 +259,7 @@ impl Breaker {
     pub(crate) fn on_abandoned_probe(&mut self, now: Instant) {
         if matches!(self.state, BreakerState::HalfOpen { .. }) {
             self.state = BreakerState::Open {
-                reopen_at: now + self.cfg.cooldown,
+                reopen_at: deadline(now, self.cfg.cooldown),
             };
         }
     }
