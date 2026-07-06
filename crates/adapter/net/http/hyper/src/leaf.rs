@@ -93,7 +93,8 @@ impl Service<http::Request<Bytes>> for HyperLeaf {
         &self,
         req: http::Request<Bytes>,
     ) -> impl Future<Output = Result<Self::Response, HttpError>> + Send {
-        let client = self.client.clone();
+        // Borrow the pooled client (the returned future borrows `&self` per the
+        // `Service` contract — no per-call `Arc` clone needed) (L4).
         async move {
             // ADR-0030 §4: absent extension ⇒ Stream. `BufferMode` is `Copy`.
             let mode = req
@@ -103,7 +104,7 @@ impl Service<http::Request<Bytes>> for HyperLeaf {
                 .unwrap_or(BufferMode::Stream);
             let (parts, body) = req.into_parts();
             let req = http::Request::from_parts(parts, Full::new(body));
-            let resp = client.request(req).await.map_err(map_legacy_err)?;
+            let resp = self.client.request(req).await.map_err(map_legacy_err)?;
             let (parts, incoming) = resp.into_parts();
             let body = match mode {
                 BufferMode::Stream => {
@@ -327,13 +328,13 @@ mod tests {
             .body(Bytes::new())
             .unwrap();
 
-        // The connection is established then dropped mid-exchange: hyper-util
-        // reports it as a (non-connect) send error → HttpError::Other. We assert
-        // it is an error and not a spurious success.
+        // The connection is established then dropped mid-exchange (a stale/closed
+        // pooled connection). It now maps to HttpError::Connection — retryable and
+        // breaker-visible (H1) — instead of the invisible Other/Unknown it used to be.
         let err = leaf.call(req).await.err().expect("aborted connection");
         assert!(
-            matches!(err, oath_adapter_net_http_api::HttpError::Other(_)),
-            "expected Other, got {err:?}"
+            matches!(err, oath_adapter_net_http_api::HttpError::Connection(_)),
+            "expected Connection, got {err:?}"
         );
     }
 
@@ -373,7 +374,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn truncated_response_body_surfaces_as_other() {
+    async fn truncated_response_body_surfaces_as_connection() {
         let base = spawn_truncating_server().await;
         let leaf = hyper_leaf(test_conn());
         let req = http::Request::get(format!("{base}/"))
@@ -394,8 +395,8 @@ mod tests {
             .await
             .expect_err("truncated body must error");
         assert!(
-            matches!(err, oath_adapter_net_http_api::HttpError::Other(_)),
-            "expected Other, got {err:?}"
+            matches!(err, oath_adapter_net_http_api::HttpError::Connection(_)),
+            "expected Connection (incomplete message), got {err:?}"
         );
     }
 
@@ -419,8 +420,8 @@ mod tests {
             .err()
             .expect("truncated body must error from call() under Buffer mode");
         assert!(
-            matches!(err, oath_adapter_net_http_api::HttpError::Other(_)),
-            "expected Other, got {err:?}"
+            matches!(err, oath_adapter_net_http_api::HttpError::Connection(_)),
+            "expected Connection (retryable → full Buffer-mode retry coverage), got {err:?}"
         );
     }
 
