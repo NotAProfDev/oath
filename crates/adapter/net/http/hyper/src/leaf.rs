@@ -18,7 +18,41 @@ use oath_adapter_net_http_api::{BufferMode, HttpError, ResponseBody, Service};
 use rustls::RootCertStore;
 use rustls::pki_types::CertificateDer;
 use std::future::Future;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
+use tokio::sync::Notify;
+
+/// Shared in-flight-request tracker so [`HyperLeaf::shutdown`] can drain before the
+/// pooled connections drop — no `RST` of an in-flight order submission. `Arc`-shared
+/// across leaf clones, so a drain on any clone observes every clone's traffic.
+#[derive(Debug, Default)]
+struct InFlight {
+    count: AtomicUsize,
+    drained: Notify,
+}
+
+/// RAII in-flight marker: bumps the count on [`enter`](InFlightGuard::enter), and on
+/// drop decrements it and wakes any [`shutdown`](HyperLeaf::shutdown) waiter once the
+/// count reaches zero.
+struct InFlightGuard(Arc<InFlight>);
+
+impl InFlightGuard {
+    fn enter(tracker: &Arc<InFlight>) -> Self {
+        tracker.count.fetch_add(1, Ordering::AcqRel);
+        Self(Arc::clone(tracker))
+    }
+}
+
+impl Drop for InFlightGuard {
+    fn drop(&mut self) {
+        // `fetch_sub` returns the *previous* value; `1` means this was the last
+        // in-flight request, so wake any drain waiter.
+        if self.0.count.fetch_sub(1, Ordering::AcqRel) == 1 {
+            self.0.drained.notify_waiters();
+        }
+    }
+}
 
 /// The leaf response body: hyper's `Incoming` with its `hyper::Error` normalized
 /// to [`HttpError`] (ADR-0030 §6).
@@ -71,16 +105,42 @@ pub struct ConnConfig {
     pub http2_keep_alive_while_idle: bool,
 }
 
-/// The hyper backend leaf. `Clone` (the pool is `Arc`-shared internally), so the
-/// whole assembled `stack()` is `Clone`.
+/// The hyper backend leaf. `Clone` (the pool **and** the in-flight tracker are
+/// `Arc`-shared internally), so the whole assembled `stack()` is `Clone`.
 #[derive(Clone)]
 pub struct HyperLeaf {
     client: Client<HttpsConnector<HttpConnector>, Full<Bytes>>,
+    inflight: Arc<InFlight>,
 }
 
 impl std::fmt::Debug for HyperLeaf {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("HyperLeaf").finish_non_exhaustive()
+        f.debug_struct("HyperLeaf")
+            .field("in_flight", &self.inflight.count.load(Ordering::Relaxed))
+            .finish_non_exhaustive()
+    }
+}
+
+impl HyperLeaf {
+    /// Drain: wait until every in-flight request has completed (or been dropped), so
+    /// pooled connections can be dropped without `RST`ing an in-flight order
+    /// submission. Returns immediately when nothing is in flight.
+    ///
+    /// This does **not** reject new calls — a caller draining for shutdown should
+    /// stop issuing requests first, then `await` this. Idempotent and safe to call
+    /// from any leaf clone (the tracker is shared).
+    pub async fn shutdown(&self) {
+        loop {
+            // Arm the wake BEFORE reading the count, so a decrement that races the
+            // read cannot be lost: `notify_waiters` only wakes already-armed waiters,
+            // and `Notified::enable` arms this one now.
+            let mut notified = std::pin::pin!(self.inflight.drained.notified());
+            notified.as_mut().enable();
+            if self.inflight.count.load(Ordering::Acquire) == 0 {
+                return;
+            }
+            notified.await;
+        }
     }
 }
 
@@ -94,8 +154,12 @@ impl Service<http::Request<Bytes>> for HyperLeaf {
         req: http::Request<Bytes>,
     ) -> impl Future<Output = Result<Self::Response, HttpError>> + Send {
         // Borrow the pooled client (the returned future borrows `&self` per the
-        // `Service` contract — no per-call `Arc` clone needed) (L4).
+        // `Service` contract — no per-call `Arc` clone needed) (L4). Mark the request
+        // in-flight from invocation until the future completes or is dropped, so
+        // `shutdown` can drain it.
+        let guard = InFlightGuard::enter(&self.inflight);
         async move {
+            let _guard = guard;
             // ADR-0030 §4: absent extension ⇒ Stream. `BufferMode` is `Copy`.
             let mode = req
                 .extensions()
@@ -167,7 +231,10 @@ pub fn hyper_leaf(conn: ConnConfig) -> HyperLeaf {
         .http2_keep_alive_while_idle(conn.http2_keep_alive_while_idle)
         .build(https);
 
-    HyperLeaf { client }
+    HyperLeaf {
+        client,
+        inflight: Arc::new(InFlight::default()),
+    }
 }
 
 #[cfg(test)]
@@ -494,5 +561,46 @@ mod tests {
             leaf.call(req).await.is_err(),
             "an HTTPS-only leaf must reject a plaintext http:// URL"
         );
+    }
+
+    #[tokio::test]
+    async fn shutdown_pends_until_in_flight_drains() {
+        use std::future::Future;
+        use std::task::{Context, Waker};
+        let leaf = hyper_leaf(test_conn());
+        // Simulate one in-flight request — exactly what `call` does internally.
+        let guard = super::InFlightGuard::enter(&leaf.inflight);
+        let mut shutdown = std::pin::pin!(leaf.shutdown());
+        let mut cx = Context::from_waker(Waker::noop());
+        assert!(
+            shutdown.as_mut().poll(&mut cx).is_pending(),
+            "shutdown must pend while a request is in flight"
+        );
+        drop(guard); // the request finished → the drain completes
+        shutdown.await;
+    }
+
+    #[tokio::test]
+    async fn call_tracks_in_flight_and_shutdown_drains_after_completion() {
+        use std::sync::atomic::Ordering;
+        let base = spawn_echo_server(b"pong").await;
+        let leaf = hyper_leaf(test_conn());
+        let req = http::Request::get(format!("{base}/x"))
+            .body(Bytes::new())
+            .unwrap();
+        // `call` marks the request in-flight synchronously, before the first poll.
+        let fut = leaf.call(req);
+        assert_eq!(
+            leaf.inflight.count.load(Ordering::Relaxed),
+            1,
+            "one request in flight"
+        );
+        fut.await.expect("round-trip");
+        assert_eq!(
+            leaf.inflight.count.load(Ordering::Relaxed),
+            0,
+            "drained on completion"
+        );
+        leaf.shutdown().await; // nothing in flight → returns immediately
     }
 }

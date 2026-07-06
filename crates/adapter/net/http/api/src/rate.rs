@@ -143,6 +143,12 @@ pub enum BuildError {
         "config has both a global and a local Concurrency policy; a Both-scoped request would need two held permits (Guarded holds one)"
     )]
     MultipleConcurrency,
+    /// A `Duration` config field that must be positive is zero — it would silently
+    /// defeat the layer it configures (`timeout == 0` fails every send instantly;
+    /// `cooldown`/`throttle_cooldown == 0` collapses the reactive breaker's Open
+    /// state). Symmetric with the pacing-parameter validation (deep review §2A).
+    #[error("config field `{0}` must be a positive Duration, but is zero")]
+    ZeroDuration(&'static str),
 }
 
 /// Validate that `cfg` is a **total**, param-sane pacing configuration.

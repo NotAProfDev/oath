@@ -54,6 +54,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **net-http operability.** `HyperLeaf::shutdown()` drains in-flight requests
+  (`await`s until an `Arc`-shared in-flight count reaches zero) so pooled
+  connections can be dropped without `RST`ing an in-flight order submission; it
+  does not reject new calls (stop sending first). `stack()`/`build()` now validate
+  `HttpConfig` `Duration`s at construction — `timeout`, `circuit_breaker.cooldown`,
+  and `circuit_breaker.throttle_cooldown` must be non-zero (a zero would silently
+  defeat the layer it configures) — returning a new `BuildError::ZeroDuration`,
+  symmetric with the existing pacing-parameter validation. `rate_limit_max_wait` and
+  the retry backoff may still be zero.
 - **net-http numeric telemetry (ADR-0014 Telemetry plane).** The resilience stack
   now emits counters/histograms through the runtime-neutral `metrics` facade
   (downstream installs the recorder/exporter; a no-op with none installed):
