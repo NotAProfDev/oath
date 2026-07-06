@@ -88,6 +88,9 @@ where
     A: AuthSource + 'static,
     K: RateKey + fmt::Debug,
 {
+    // Reject degenerate zero Durations before any layer is built — symmetric with
+    // the pacing-parameter validation below (deep review §2A).
+    validate_config(&cfg)?;
     // Fallible layer first: validates coverage + concurrency-singleton (fail-closed
     // at construction — nothing else is built if this errors).
     let rate = RateLimitLayer::new(&rate_limits, timer.clone(), cfg.rate_limit_max_wait)?;
@@ -101,6 +104,30 @@ where
         .layer(TimeoutLayer::new(cfg.timeout, timer)) // innermost Layer-factory
         .service(inner);
     Ok(svc)
+}
+
+/// Reject degenerate zero `Duration`s that would silently defeat the layer they
+/// configure: `timeout == 0` (every send instantly `Timeout`) and the breaker's
+/// `cooldown`/`throttle_cooldown == 0` (Open collapses straight back to Half-Open).
+///
+/// `rate_limit_max_wait` and the retry backoff (`base`/`cap`) may legitimately be
+/// zero (throttle-immediately / no-backoff), so they are **not** checked.
+///
+/// # Errors
+/// [`BuildError::ZeroDuration`] naming the first offending field.
+const fn validate_config(cfg: &HttpConfig) -> Result<(), BuildError> {
+    if cfg.timeout.is_zero() {
+        return Err(BuildError::ZeroDuration("timeout"));
+    }
+    if cfg.circuit_breaker.cooldown.is_zero() {
+        return Err(BuildError::ZeroDuration("circuit_breaker.cooldown"));
+    }
+    if cfg.circuit_breaker.throttle_cooldown.is_zero() {
+        return Err(BuildError::ZeroDuration(
+            "circuit_breaker.throttle_cooldown",
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -364,6 +391,57 @@ mod tests {
             panic!("expected a BuildError for a non-total rate config");
         };
         assert!(matches!(err, BuildError::UndeclaredKey(ref k) if k.contains("History")));
+    }
+
+    #[test]
+    fn zero_durations_are_rejected_at_build() {
+        let timer = MockTimer::new();
+        let leaf = || ScriptLeaf::new(timer.clone(), vec![Step::Status(200)]);
+
+        // timeout == 0 would make every send instantly Timeout.
+        let Err(err) = stack(
+            leaf(),
+            http_cfg(1, Duration::ZERO, Duration::from_secs(30)),
+            timer.clone(),
+            NoAuth,
+            rate_cfg(),
+        ) else {
+            panic!("timeout == 0 must be a BuildError");
+        };
+        assert_eq!(err, BuildError::ZeroDuration("timeout"));
+
+        // cooldown == 0 would collapse the breaker's Open state.
+        let mut cfg = http_cfg(1, Duration::from_secs(1), Duration::ZERO);
+        cfg.circuit_breaker.cooldown = Duration::ZERO;
+        let Err(err) = stack(leaf(), cfg, timer.clone(), NoAuth, rate_cfg()) else {
+            panic!("cooldown == 0 must be a BuildError");
+        };
+        assert_eq!(err, BuildError::ZeroDuration("circuit_breaker.cooldown"));
+
+        // throttle_cooldown == 0 would collapse the 429 penalty box.
+        let mut cfg = http_cfg(1, Duration::from_secs(1), Duration::ZERO);
+        cfg.circuit_breaker.throttle_cooldown = Duration::ZERO;
+        let Err(err) = stack(leaf(), cfg, timer.clone(), NoAuth, rate_cfg()) else {
+            panic!("throttle_cooldown == 0 must be a BuildError");
+        };
+        assert_eq!(
+            err,
+            BuildError::ZeroDuration("circuit_breaker.throttle_cooldown")
+        );
+
+        // Sanity: rate_limit_max_wait == 0 is legitimate (throttle-immediately) and
+        // must still build.
+        assert!(
+            stack(
+                leaf(),
+                http_cfg(1, Duration::from_secs(1), Duration::ZERO),
+                timer,
+                NoAuth,
+                rate_cfg(),
+            )
+            .is_ok(),
+            "max_wait == 0 is valid, not a zero-Duration error"
+        );
     }
 
     // ---- Task 2 tests -----------------------------------------------------

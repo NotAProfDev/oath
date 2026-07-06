@@ -15,8 +15,8 @@ hyper = { workspace = true }
 hyper-util = { workspace = true }
 hyper-rustls = { workspace = true }
 rustls = { workspace = true }
-# Prod: only the `TokioTimer` sleeps on tokio's clock.
-tokio = { workspace = true, features = ["time"] }
+# `time` — the `TokioTimer` clock; `sync` — the `Notify` behind `HyperLeaf::shutdown`.
+tokio = { workspace = true, features = ["time", "sync"] }
 
 [dev-dependencies]
 # Tests spin loopback servers: `#[tokio::test]` (macros+rt), `spawn` (rt),
