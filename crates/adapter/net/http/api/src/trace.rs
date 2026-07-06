@@ -35,6 +35,7 @@ pub(crate) const fn kind_label(kind: ErrorKind) -> &'static str {
         ErrorKind::Auth => "auth",
         ErrorKind::Client => "client",
         ErrorKind::Server => "server",
+        ErrorKind::CircuitOpen => "circuit_open",
         _ => "unknown", // ErrorKind::Unknown and any future non_exhaustive variant
     }
 }
@@ -565,5 +566,15 @@ mod tests {
             Some("connection")
         );
         drop(store);
+    }
+
+    #[test]
+    fn circuit_open_has_its_own_label() {
+        // The breaker fast-reject is the single most operationally important signal;
+        // it must not fall into the `_ => "unknown"` catch-all (M2).
+        assert_eq!(
+            super::kind_label(oath_adapter_net_api::ErrorKind::CircuitOpen),
+            "circuit_open"
+        );
     }
 }
