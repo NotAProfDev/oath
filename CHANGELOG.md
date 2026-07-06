@@ -171,3 +171,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   episode (M1). `ErrorKind::CircuitOpen` now carries its own `circuit_open` telemetry label
   instead of `unknown` (M2). Cooldown and permit-wait deadline arithmetic saturates instead
   of panicking on degenerate `Duration` configs (L1).
+- **net-http:** `Auth`, `SetHeaders`, and `HttpConfig` now hand-write redacting `Debug` impls
+  (like every other layer) instead of deriving `Debug` over an `AuthSource`/`HeaderMap` that
+  can hold credentials or static API keys, so a `{:?}`/`tracing` of them no longer leaks
+  secrets (M3).

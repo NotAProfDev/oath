@@ -3,6 +3,7 @@
 
 use crate::{HttpError, Service};
 use bytes::Bytes;
+use std::fmt;
 use std::future::Future;
 
 /// The credential seam the adapter implements (ADR-0034 §1).
@@ -40,10 +41,18 @@ impl AuthSource for NoAuth {
 /// Runs [`AuthSource::authorize`] on the final request immediately before the
 /// inner service (ADR-0034 §1). Sits innermost in the stack — inside `Retry` —
 /// so credentials are re-stamped per attempt.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Auth<S, A> {
     inner: S,
     auth: A,
+}
+
+impl<S, A> fmt::Debug for Auth<S, A> {
+    // Redacted: `auth` (an `AuthSource`) may hold live credentials, so `Auth` does
+    // not derive `Debug`; it hand-writes a redacting impl like the other layers (M3).
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Auth").finish_non_exhaustive()
+    }
 }
 
 impl<S, A> Auth<S, A> {
@@ -83,10 +92,18 @@ where
 /// leaf (ADR-0034 §1). Writes with insert (last-writer) semantics; multi-valued
 /// defaults are not supported. A default also overrides any value the caller already
 /// set for the same key on the request (precedence: caller-set < static defaults < `Auth`).
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct SetHeaders<S> {
     inner: S,
     headers: http::HeaderMap,
+}
+
+impl<S> fmt::Debug for SetHeaders<S> {
+    // Redacted: `headers` holds static defaults that may include API keys, and
+    // `HeaderValue`'s `Debug` prints values unless marked sensitive (M3).
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SetHeaders").finish_non_exhaustive()
+    }
 }
 
 impl<S> SetHeaders<S> {
@@ -294,6 +311,49 @@ mod tests {
         assert_eq!(
             leaf.seen()[0].headers()["x-api-key"],
             http::HeaderValue::from_static("dynamic")
+        );
+    }
+
+    #[test]
+    fn debug_impls_do_not_leak_secrets() {
+        // A `Debug`-deriving, secret-bearing `AuthSource` (declared first to satisfy
+        // clippy's items-before-statements).
+        #[derive(Clone, Debug)]
+        struct SecretAuth {
+            #[allow(dead_code)]
+            token: &'static str,
+        }
+        impl AuthSource for SecretAuth {
+            fn authorize(
+                &self,
+                _req: &mut http::Request<Bytes>,
+            ) -> impl Future<Output = Result<(), HttpError>> + Send {
+                std::future::ready(Ok(()))
+            }
+        }
+
+        // `SetHeaders` holding a static API key must not render it under `{:?}`.
+        let mut headers = http::HeaderMap::new();
+        headers.insert(
+            http::header::AUTHORIZATION,
+            http::HeaderValue::from_static("Bearer SECRET_TOKEN"),
+        );
+        let set = SetHeaders::new((), headers);
+        assert!(
+            !format!("{set:?}").contains("SECRET_TOKEN"),
+            "SetHeaders Debug leaked a secret header"
+        );
+
+        // `Auth` wrapping the secret-bearing source must not render it (M3).
+        let auth = Auth::new(
+            (),
+            SecretAuth {
+                token: "SECRET_TOKEN",
+            },
+        );
+        assert!(
+            !format!("{auth:?}").contains("SECRET_TOKEN"),
+            "Auth Debug leaked the AuthSource credentials"
         );
     }
 }

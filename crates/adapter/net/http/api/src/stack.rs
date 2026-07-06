@@ -26,7 +26,7 @@ use std::time::Duration;
 /// `K`-generic pacing map (`RateLimitConfig<K>`), `auth`, and `timer` are
 /// separate [`stack`] arguments, so this type carries no type parameter and
 /// no `serde` (deserialisation stays in the adapter, ADR-0003).
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct HttpConfig {
     /// Per-attempt send timeout — bounds the send, **not** the permit wait.
     pub timeout: Duration,
@@ -41,6 +41,18 @@ pub struct HttpConfig {
     /// `timeout`: `RateLimit` sits **outside** `Timeout`, so the permit wait is
     /// bounded by this — at IBKR's 1/15-min buckets, minutes not seconds.
     pub rate_limit_max_wait: Duration,
+}
+
+impl fmt::Debug for HttpConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Omits `headers` — static defaults may include API keys (M3).
+        f.debug_struct("HttpConfig")
+            .field("timeout", &self.timeout)
+            .field("retry", &self.retry)
+            .field("circuit_breaker", &self.circuit_breaker)
+            .field("rate_limit_max_wait", &self.rate_limit_max_wait)
+            .finish_non_exhaustive()
+    }
 }
 
 /// Assemble the canonical resilience stack (ADR-0031 §1) over an arbitrary leaf.
@@ -585,6 +597,21 @@ mod tests {
             leaf.calls(),
             1,
             "only the well-formed request reached the leaf"
+        );
+    }
+
+    #[test]
+    fn http_config_debug_omits_secret_headers() {
+        // `HttpConfig.headers` may carry static API keys; its `Debug` must not
+        // render them (M3).
+        let mut cfg = http_cfg(1, Duration::from_secs(30), Duration::ZERO);
+        cfg.headers.insert(
+            http::header::AUTHORIZATION,
+            http::HeaderValue::from_static("Bearer SECRET_TOKEN"),
+        );
+        assert!(
+            !format!("{cfg:?}").contains("SECRET_TOKEN"),
+            "HttpConfig Debug leaked a secret default header"
         );
     }
 }
