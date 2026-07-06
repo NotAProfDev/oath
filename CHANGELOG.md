@@ -161,3 +161,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and GitHub CLI features, plus automatic git hook activation.
 - Pre-commit hook: `cargo fmt --check` and `cargo clippy -D warnings`.
 - Dual license: MIT OR Apache-2.0.
+
+### Fixed
+
+- **net-http:** a local pacing rejection (`HttpError::Throttled`, request never sent) no
+  longer trips the circuit breaker into the ~15-minute throttle-cooldown penalty box; only
+  a venue `429` *response* trips it (C1). The Half-Open cancellation guard is armed only for
+  genuine probes, so a cancelled non-probe call can no longer reopen a concurrent Half-Open
+  episode (M1). `ErrorKind::CircuitOpen` now carries its own `circuit_open` telemetry label
+  instead of `unknown` (M2). Cooldown and permit-wait deadline arithmetic saturates instead
+  of panicking on degenerate `Duration` configs (L1).
