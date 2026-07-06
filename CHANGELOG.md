@@ -25,6 +25,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `oath-adapter-net-api`, so the HTTP and (forthcoming) WebSocket mock stacks
   share one fake clock without cross-depending (ADR-0034 §Amendments.4).
   `oath-adapter-net-http-mock` now provides only `MockClient`/`MockBody`.
+- **net-http:** trimmed the build's dependency-feature footprint. Workspace `tokio`
+  drops `features = ["full"]` for minimal defaults; each crate opts into only what it
+  uses (prod `net-http-hyper`: `time`; dev/test: `macros`/`rt`/`net`/`io-util`/
+  `test-util`), keeping `fs`/`process`/`signal`/`io-std` out of downstream production
+  binaries (M7). `futures-util` and `tracing` are pinned to explicit features
+  (`default-features = false`), dropping the `futures-macro`/`tracing-attributes`
+  proc-macro trees and `parking_lot`; the unused `tracing-subscriber` dev-dependency is
+  removed from `net-http-hyper` (L6, L5). No behaviour or public-API change.
 
 ### Added
 

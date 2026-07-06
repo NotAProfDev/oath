@@ -16,5 +16,5 @@ futures-core = { workspace = true }
 [dev-dependencies]
 oath-adapter-net-api = { workspace = true }
 bytes = { workspace = true }
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt"] }
 futures-util = { workspace = true }

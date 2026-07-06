@@ -17,5 +17,5 @@ thiserror = { workspace = true }
 futures-core = { workspace = true }
 
 [dev-dependencies]
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt"] }
 futures-util = { workspace = true }
