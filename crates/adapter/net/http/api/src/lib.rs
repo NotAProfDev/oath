@@ -11,7 +11,7 @@
 //! - [`rate`] — `RateKey`, the `LimitPolicy`/`LimitDecl` vocabulary, the total
 //!   `RateLimitConfig`, and the boot-time `validate_coverage` check
 //! - [`rate_limit`] — the `RateLimit` layer, its `RateLimitLayer` factory, and
-//!   the `RateScope`/`Scope` per-request directive
+//!   the `RateScope` per-request directive
 //! - [`retry`] — the `Retry` layer, its `RetryLayer` factory, and the
 //!   `Retryable`/`RetryConfig` retry directive + schedule
 //! - [`circuit_breaker`] — the `CircuitBreaker` layer, its `CircuitBreakerLayer`
@@ -50,7 +50,7 @@ pub use rate::{
     BuildError, LimitDecl, LimitPolicy, RateKey, RateLimitConfig, validate_concurrency_singleton,
     validate_coverage,
 };
-pub use rate_limit::{RateLimit, RateLimitLayer, RateScope, Scope};
+pub use rate_limit::{RateLimit, RateLimitLayer, RateScope};
 pub use retry::{Retry, RetryConfig, RetryLayer, Retryable};
 pub use service::Service;
 pub use stack::{HttpConfig, stack};

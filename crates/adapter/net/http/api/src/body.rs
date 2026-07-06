@@ -22,17 +22,27 @@ pub enum BufferMode {
 }
 
 pin_project_lite::pin_project! {
-    /// The canonical response body: one buffered frame *xor* a live streaming
-    /// body, behind one stable type so adapters never name the buffer-vs-stream
-    /// machinery. Forwards all three `Body` methods to the active arm — a
-    /// wrapper that silently reported the default `size_hint`/`is_end_stream`
-    /// would make a caller's `.collect()` pre-size and any max-size guard wrong.
-    #[project = ResponseBodyProj]
-    #[allow(missing_docs)]
-    pub enum ResponseBody<B> {
-        /// A fully-collected body (single frame).
+    /// The canonical HTTP response body: one buffered frame *xor* a live streaming
+    /// body, behind one **opaque** type so adapters never name — or match on — the
+    /// buffer-vs-stream machinery (ADR-0030 §3). Construct via
+    /// [`buffered`](Self::buffered)/[`streaming`](Self::streaming), inspect the arm
+    /// via [`is_buffered`](Self::is_buffered)/[`is_streaming`](Self::is_streaming),
+    /// and consume it through the [`Body`] trait. Forwards all three `Body` methods
+    /// to the active arm — a wrapper that silently reported the default
+    /// `size_hint`/`is_end_stream` would make a caller's `.collect()` pre-size and
+    /// any max-size guard wrong.
+    pub struct ResponseBody<B> {
+        #[pin]
+        inner: Inner<B>,
+    }
+}
+
+pin_project_lite::pin_project! {
+    /// The private buffer-xor-stream representation `ResponseBody` hides so callers
+    /// cannot construct or destructure the internal arms (M9, ADR-0030 §3).
+    #[project = InnerProj]
+    enum Inner<B> {
         Buffered { #[pin] body: Full<Bytes> },
-        /// A live streaming backend body.
         Streaming { #[pin] body: B },
     }
 }
@@ -41,15 +51,47 @@ impl<B> ResponseBody<B> {
     /// Wrap already-collected bytes as a one-frame buffered body.
     #[must_use]
     pub fn buffered(bytes: Bytes) -> Self {
-        Self::Buffered {
-            body: Full::new(bytes),
+        Self {
+            inner: Inner::Buffered {
+                body: Full::new(bytes),
+            },
         }
     }
 
     /// Wrap a live streaming backend body.
     #[must_use]
     pub const fn streaming(body: B) -> Self {
-        Self::Streaming { body }
+        Self {
+            inner: Inner::Streaming { body },
+        }
+    }
+
+    /// Whether this is a fully-collected (buffered) body.
+    #[must_use]
+    pub const fn is_buffered(&self) -> bool {
+        matches!(self.inner, Inner::Buffered { .. })
+    }
+
+    /// Whether this is a live streaming body.
+    #[must_use]
+    pub const fn is_streaming(&self) -> bool {
+        matches!(self.inner, Inner::Streaming { .. })
+    }
+}
+
+impl<B> fmt::Debug for ResponseBody<B> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Opaque by design: report only which arm is active, never the payload.
+        f.debug_struct("ResponseBody")
+            .field(
+                "kind",
+                &if self.is_buffered() {
+                    "buffered"
+                } else {
+                    "streaming"
+                },
+            )
+            .finish_non_exhaustive()
     }
 }
 
@@ -64,26 +106,26 @@ where
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
     ) -> Poll<Option<Result<Frame<Bytes>, HttpError>>> {
-        match self.project() {
+        match self.project().inner.project() {
             // `Full`'s error is `Infallible`, so map it away to unify with `HttpError`.
-            ResponseBodyProj::Buffered { body } => body
+            InnerProj::Buffered { body } => body
                 .poll_frame(cx)
                 .map(|frame| frame.map(|res| res.map_err(|never| match never {}))),
-            ResponseBodyProj::Streaming { body } => body.poll_frame(cx),
+            InnerProj::Streaming { body } => body.poll_frame(cx),
         }
     }
 
     fn is_end_stream(&self) -> bool {
-        match self {
-            Self::Buffered { body } => body.is_end_stream(),
-            Self::Streaming { body } => body.is_end_stream(),
+        match &self.inner {
+            Inner::Buffered { body } => body.is_end_stream(),
+            Inner::Streaming { body } => body.is_end_stream(),
         }
     }
 
     fn size_hint(&self) -> SizeHint {
-        match self {
-            Self::Buffered { body } => body.size_hint(),
-            Self::Streaming { body } => body.size_hint(),
+        match &self.inner {
+            Inner::Buffered { body } => body.size_hint(),
+            Inner::Streaming { body } => body.size_hint(),
         }
     }
 }

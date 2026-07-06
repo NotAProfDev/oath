@@ -175,8 +175,8 @@ mod tests {
     use super::{ConnConfig, HyperLeaf, TlsTrust, hyper_leaf};
     use bytes::Bytes;
     use http_body_util::BodyExt;
+    use oath_adapter_net_http_api::BufferMode;
     use oath_adapter_net_http_api::Service;
-    use oath_adapter_net_http_api::{BufferMode, ResponseBody};
     use std::convert::Infallible;
     use std::time::Duration;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -246,7 +246,7 @@ mod tests {
 
         let resp = leaf.call(req).await.expect("round-trip");
         assert!(
-            matches!(resp.body(), ResponseBody::Buffered { .. }),
+            resp.body().is_buffered(),
             "BufferMode::Buffer must yield a Buffered arm, got a streaming body"
         );
         let body = resp.into_body().collect().await.unwrap().to_bytes();
@@ -264,7 +264,7 @@ mod tests {
             .unwrap();
         let resp = leaf.call(req).await.expect("round-trip");
         assert!(
-            matches!(resp.body(), ResponseBody::Streaming { .. }),
+            resp.body().is_streaming(),
             "absent BufferMode must stay streaming"
         );
 
@@ -275,7 +275,7 @@ mod tests {
         req.extensions_mut().insert(BufferMode::Stream);
         let resp = leaf.call(req).await.expect("round-trip");
         assert!(
-            matches!(resp.body(), ResponseBody::Streaming { .. }),
+            resp.body().is_streaming(),
             "explicit Stream must stay streaming"
         );
     }
@@ -293,14 +293,7 @@ mod tests {
             .body(Bytes::new())
             .unwrap();
 
-        // `Result::expect_err` needs `T: Debug`, but the `Ok` payload
-        // (`Response<ResponseBody<HyperBody>>`) isn't `Debug` — go via `Option`
-        // instead, which only needs `E: Debug` (satisfied by `HttpError`).
-        let err = leaf
-            .call(req)
-            .await
-            .err()
-            .expect("must time out connecting");
+        let err = leaf.call(req).await.expect_err("must time out connecting");
         assert!(
             matches!(err, oath_adapter_net_http_api::HttpError::Connection(_)),
             "expected Connection, got {err:?}"
@@ -331,7 +324,7 @@ mod tests {
         // The connection is established then dropped mid-exchange (a stale/closed
         // pooled connection). It now maps to HttpError::Connection — retryable and
         // breaker-visible (H1) — instead of the invisible Other/Unknown it used to be.
-        let err = leaf.call(req).await.err().expect("aborted connection");
+        let err = leaf.call(req).await.expect_err("aborted connection");
         assert!(
             matches!(err, oath_adapter_net_http_api::HttpError::Connection(_)),
             "expected Connection, got {err:?}"
@@ -417,8 +410,7 @@ mod tests {
         let err = leaf
             .call(req)
             .await
-            .err()
-            .expect("truncated body must error from call() under Buffer mode");
+            .expect_err("truncated body must error from call() under Buffer mode");
         assert!(
             matches!(err, oath_adapter_net_http_api::HttpError::Connection(_)),
             "expected Connection (retryable → full Buffer-mode retry coverage), got {err:?}"
