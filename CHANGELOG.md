@@ -180,3 +180,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (like every other layer) instead of deriving `Debug` over an `AuthSource`/`HeaderMap` that
   can hold credentials or static API keys, so a `{:?}`/`tracing` of them no longer leaks
   secrets (M3).
+- **net-http (hyper leaf):** post-connect transport failures — a reset/closed pooled
+  connection, an incomplete-message truncation, a cancelled/aborted transfer — now map
+  to `HttpError::Connection` (retryable and circuit-breaker-visible) instead of the
+  invisible `Other`/`Unknown` they collapsed to (H1); this also restores
+  `BufferMode::Buffer`'s intended full-body retry coverage (H2). The leaf no longer
+  clones the pooled client per call (L4).
