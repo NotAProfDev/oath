@@ -108,7 +108,7 @@ arms its cancellation `ProbeGuard` only for genuine Half-Open probes. One new ti
   > tests` (reuse its `ScriptLeaf`, `http_cfg`, `rate_cfg`, `req`, `stack`, `Scope`, `NoAuth`).
 
 - [ ] **Step 3: Run both tests to confirm they fail.**
-  Run: `cd .claude/worktrees/net-http-tier1 && cargo test -p oath-adapter-net-http-api only_a_429_response_trips_now repeated_local_throttle`
+  Run: `cd .claude/worktrees/net-http-tier1 && cargo test -p oath-adapter-net-http-api -- only_a_429_response_trips_now repeated_local_throttle`
   Expected: FAIL — `classify(Err(Throttled))` is `TripNow` (want `Ignored`); the stack test gets
   `CircuitOpen` on the well-formed request (breaker opened) and `leaf.calls() == 0`.
 
@@ -139,7 +139,7 @@ arms its cancellation `ProbeGuard` only for genuine Half-Open probes. One new ti
   *error* is a local decision and is `Ignored`".
 
 - [ ] **Step 6: Run the tests to confirm they pass.**
-  Run: `cargo test -p oath-adapter-net-http-api only_a_429_response_trips_now repeated_local_throttle`
+  Run: `cargo test -p oath-adapter-net-http-api -- only_a_429_response_trips_now repeated_local_throttle`
   Expected: PASS. Also re-run the whole crate: `cargo test -p oath-adapter-net-http-api`
   Expected: PASS (the old `a_single_429_trips_immediately_on_the_long_cooldown` still passes —
   it uses `Step::Status(429)`, the Ok-side arm, which is unchanged).
@@ -252,7 +252,7 @@ git commit -m "fix(net): local Throttled error no longer trips the circuit break
 ```
 
 - [ ] **Step 3: Run to confirm failure.**
-  Run: `cargo test -p oath-adapter-net-http-api admit_distinguishes cancelling_a_non_probe`
+  Run: `cargo test -p oath-adapter-net-http-api -- admit_distinguishes cancelling_a_non_probe`
   Expected: FAIL — `Admit::Probe` variant does not exist (compile error), which also fails the
   service test's premise. (Compile error counts as red.)
 
