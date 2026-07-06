@@ -37,7 +37,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::build;
-    use crate::leaf::ConnConfig;
+    use crate::leaf::{ConnConfig, TlsTrust};
     use crate::timer::TokioTimer;
     use bytes::Bytes;
     use http_body_util::BodyExt;
@@ -68,6 +68,11 @@ mod tests {
             pool_max_idle_per_host: 4,
             pool_idle_timeout: Duration::from_secs(30),
             connect_timeout: Duration::from_secs(2),
+            tls_trust: TlsTrust::WebpkiRoots,
+            allow_http: true, // the build() smoke test talks to a plain-HTTP echo server
+            http2_keep_alive_interval: None,
+            http2_keep_alive_timeout: Duration::from_secs(10),
+            http2_keep_alive_while_idle: false,
         }
     }
 
