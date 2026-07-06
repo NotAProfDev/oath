@@ -4,8 +4,10 @@
 //! `RateLimit` tries never to hit a 429; `CircuitBreaker` stops cold if the host
 //! fails anyway. It trips **Open** after [`CircuitBreakerConfig::failure_threshold`]
 //! consecutive transport failures (`HttpError::{Connection, Timeout}` or a `5xx`
-//! response), or **immediately** on a `Throttled`/429 with the long
-//! [`CircuitBreakerConfig::throttle_cooldown`] (IBKR's ~15-minute penalty box).
+//! response), or **immediately** on a venue **429 response** with the long
+//! [`CircuitBreakerConfig::throttle_cooldown`] (IBKR's ~15-minute penalty box). A
+//! `Throttled` *error* is a local pacing decision (the request was never sent) and
+//! is ignored — it never trips the breaker.
 //! While Open it **fast-rejects** every request with a non-retryable
 //! [`HttpError::CircuitOpen`] — the inner stack is
 //! never touched. After the cooldown a bounded number of **Half-Open** probes test
@@ -19,6 +21,7 @@
 //! the next admit), so there is no timer race and no new dependency. Body-transparent
 //! — `http::Response<B>` is forwarded untouched.
 
+use crate::clock::deadline;
 use crate::{HttpError, Service};
 use bytes::Bytes;
 use oath_adapter_net_api::{ErrorKind, HasErrorKind, Layer, Timer};
@@ -51,7 +54,8 @@ pub struct CircuitBreakerConfig {
 pub(crate) enum Class {
     /// A genuine transport/server failure — advances the Closed trip counter.
     Failure,
-    /// A throttle/429 — trips the circuit **immediately** on the long cooldown.
+    /// A venue **429 response** — trips the circuit **immediately** on the long
+    /// cooldown. (A `Throttled` *error* is a local decision and never reaches here.)
     TripNow,
     /// Neither a failure nor a trip (4xx, `Auth`, unclassified) — a no-op in Closed;
     /// resolves a Half-Open probe (a reached host proves recovery).
@@ -63,12 +67,13 @@ pub(crate) enum Class {
 /// Classify a call outcome for the breaker (ADR-0031 §5).
 ///
 /// Genuine transport failures (`Connection`/`Timeout`), the error-side `Server`
-/// kind, and `5xx` responses are all `Failure`; `Throttled`/429 is `TripNow`; a
-/// `4xx`/`Auth`/unclassified error is `Ignored` (never trips **and never
-/// resets** — so an interleave cannot mask a building outage); `2xx`/`3xx` is
-/// `Success`. `Unknown → Ignored` is the conservative v1 default (the
-/// resilience4j fail-safe `Unknown → Failure` is a documented future
-/// improvement).
+/// kind, and `5xx` responses are all `Failure`; a venue **429 response** is
+/// `TripNow`; a `4xx`/`Auth`/`Throttled`/unclassified **error** is `Ignored` — a
+/// `Throttled` error is a local pacing decision that never reached the host
+/// (ADR-0031 §5), and `Ignored` never trips **and never resets**, so an interleave
+/// cannot mask a building outage; `2xx`/`3xx` is `Success`. `Unknown → Ignored` is
+/// the conservative v1 default (the resilience4j fail-safe `Unknown → Failure` is a
+/// documented future improvement).
 pub(crate) fn classify<B>(outcome: &Result<http::Response<B>, HttpError>) -> Class {
     match outcome {
         Err(e) => match e.kind() {
@@ -76,9 +81,12 @@ pub(crate) fn classify<B>(outcome: &Result<http::Response<B>, HttpError>) -> Cla
             // defensive: no HttpError maps here today, but keeps classify total if
             // kind() widens.
             ErrorKind::Connection | ErrorKind::Timeout | ErrorKind::Server => Class::Failure,
-            ErrorKind::Throttled => Class::TripNow,
-            // Auth, Client, Unknown, CircuitOpen — and any future kind — are Ignored
-            // (no HttpError maps to Client either today; same defensive rationale).
+            // A `Throttled` *error* is a purely LOCAL pacing decision (RateLimit's
+            // max_wait breach / fail-closed reject) — the request never reached the
+            // host, so it carries zero host-health signal and must NOT trip the
+            // breaker. Only a real venue 429 *response* (the Ok-side arm) trips
+            // (ADR-0031 §5, clarified). Throttled/Auth/Client/Unknown/CircuitOpen —
+            // and any future kind — are therefore Ignored.
             _ => Class::Ignored,
         },
         Ok(resp) => {
@@ -115,8 +123,12 @@ enum BreakerState {
 /// The admission verdict for one call.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Admit {
-    /// Admit the call to the inner stack.
+    /// Admit a normal (Closed-state) call to the inner stack.
     Pass,
+    /// Admit a **Half-Open probe** — the call whose outcome resolves the episode.
+    /// The service arms its cancellation guard only for this verdict, so a
+    /// cancelled non-probe call cannot reopen a concurrent Half-Open episode.
+    Probe,
     /// Reject the call fast with `CircuitOpen` — the inner stack is not touched.
     Reject,
 }
@@ -156,7 +168,7 @@ impl Breaker {
                         probes_left: probes - 1,
                         successes_needed: probes,
                     };
-                    Admit::Pass
+                    Admit::Probe
                 } else {
                     Admit::Reject
                 }
@@ -164,7 +176,7 @@ impl Breaker {
             BreakerState::HalfOpen { probes_left, .. } => {
                 if *probes_left > 0 {
                     *probes_left -= 1;
-                    Admit::Pass
+                    Admit::Probe
                 } else {
                     Admit::Reject // concurrency gate: no more than `half_open_probes` in flight
                 }
@@ -182,7 +194,7 @@ impl Breaker {
                     let n = consecutive_failures.saturating_add(1);
                     self.state = if n >= self.cfg.failure_threshold.get() {
                         BreakerState::Open {
-                            reopen_at: now + self.cfg.cooldown,
+                            reopen_at: deadline(now, self.cfg.cooldown),
                         }
                     } else {
                         BreakerState::Closed {
@@ -192,7 +204,7 @@ impl Breaker {
                 },
                 Class::TripNow => {
                     self.state = BreakerState::Open {
-                        reopen_at: now + self.cfg.throttle_cooldown,
+                        reopen_at: deadline(now, self.cfg.throttle_cooldown),
                     };
                 },
                 Class::Ignored => {}, // streak untouched — a 4xx/Auth neither trips nor resets
@@ -208,12 +220,12 @@ impl Breaker {
             } => match class {
                 Class::Failure => {
                     self.state = BreakerState::Open {
-                        reopen_at: now + self.cfg.cooldown,
+                        reopen_at: deadline(now, self.cfg.cooldown),
                     };
                 },
                 Class::TripNow => {
                     self.state = BreakerState::Open {
-                        reopen_at: now + self.cfg.throttle_cooldown,
+                        reopen_at: deadline(now, self.cfg.throttle_cooldown),
                     };
                 },
                 // A reached-host probe (2xx/3xx or 4xx/Auth) resolves; the last one closes.
@@ -247,7 +259,7 @@ impl Breaker {
     pub(crate) fn on_abandoned_probe(&mut self, now: Instant) {
         if matches!(self.state, BreakerState::HalfOpen { .. }) {
             self.state = BreakerState::Open {
-                reopen_at: now + self.cfg.cooldown,
+                reopen_at: deadline(now, self.cfg.cooldown),
             };
         }
     }
@@ -396,16 +408,22 @@ where
                     .unwrap_or_else(std::sync::PoisonError::into_inner);
                 breaker.admit(now)
             };
-            if admit == Admit::Reject {
-                return Err(HttpError::CircuitOpen); // fast reject — the leaf is not touched
-            }
+            let is_probe = match admit {
+                Admit::Reject => return Err(HttpError::CircuitOpen), // fast reject — leaf untouched
+                Admit::Probe => true,
+                Admit::Pass => false,
+            };
 
-            // Arm the drop-guard: if this future is cancelled (or the leaf panics)
-            // before the real outcome is recorded below, the guard resolves the
-            // (possibly Half-Open) probe instead of stranding the breaker.
-            let mut guard = ProbeGuard::arm(&self.breaker, &self.timer);
+            // Arm the drop-guard ONLY for a genuine Half-Open probe: if a probe's
+            // future is cancelled (or the leaf panics) before its outcome is
+            // recorded below, the guard reopens the episode instead of stranding the
+            // breaker. A cancelled Closed-state call carries no probe semantics, so
+            // it must not touch a concurrently-entered Half-Open episode (M1).
+            let mut guard = is_probe.then(|| ProbeGuard::arm(&self.breaker, &self.timer));
             let outcome = self.inner.call(req).await; // NO lock held across the await
-            guard.disarm(); // the future was NOT cancelled — record the true outcome below
+            if let Some(g) = guard.as_mut() {
+                g.disarm(); // completed normally — record the true outcome below
+            }
 
             // Record the classified outcome under a second short lock.
             let class = classify(&outcome);
@@ -446,8 +464,12 @@ mod classify_tests {
     }
 
     #[test]
-    fn throttle_and_429_trip_now() {
-        assert_eq!(classify::<()>(&Err(HttpError::Throttled)), Class::TripNow);
+    fn only_a_429_response_trips_now_not_a_local_throttled_error() {
+        // A `Throttled` *error* is produced only locally by RateLimit (max_wait /
+        // fail-closed reject) — the request never reached the host, so it carries
+        // no host-health signal and must be Ignored, never TripNow (ADR-0031 §5).
+        assert_eq!(classify::<()>(&Err(HttpError::Throttled)), Class::Ignored);
+        // A real venue 429 *response* still trips.
         assert_eq!(classify(&ok(429)), Class::TripNow);
     }
 
@@ -543,7 +565,7 @@ mod breaker_tests {
         );
         assert_eq!(
             b.admit(now + Duration::from_secs(900)),
-            Admit::Pass,
+            Admit::Probe,
             "throttle_cooldown elapsed → first probe admitted"
         );
     }
@@ -557,7 +579,7 @@ mod breaker_tests {
         let after = now + Duration::from_secs(30);
         assert_eq!(
             b.admit(after),
-            Admit::Pass,
+            Admit::Probe,
             "cooldown elapsed → first probe"
         );
         assert_eq!(
@@ -573,7 +595,7 @@ mod breaker_tests {
         let mut b = Breaker::new(cfg(1, 1));
         b.record(Class::Failure, now);
         let after = now + Duration::from_secs(30);
-        assert_eq!(b.admit(after), Admit::Pass);
+        assert_eq!(b.admit(after), Admit::Probe);
         b.record(Class::Success, after);
         assert_eq!(b.admit(after), Admit::Pass, "probe succeeded → closed");
     }
@@ -584,7 +606,7 @@ mod breaker_tests {
         let mut b = Breaker::new(cfg(1, 1));
         b.record(Class::Failure, now);
         let after = now + Duration::from_secs(30);
-        assert_eq!(b.admit(after), Admit::Pass);
+        assert_eq!(b.admit(after), Admit::Probe);
         b.record(Class::Ignored, after); // a 4xx probe still proves the host is reachable
         assert_eq!(
             b.admit(after),
@@ -599,12 +621,12 @@ mod breaker_tests {
         let mut b = Breaker::new(cfg(1, 1));
         b.record(Class::Failure, now);
         let after = now + Duration::from_secs(30);
-        assert_eq!(b.admit(after), Admit::Pass);
+        assert_eq!(b.admit(after), Admit::Probe);
         b.record(Class::Failure, after); // probe fails → reopen with a fresh cooldown
         assert_eq!(b.admit(after), Admit::Reject, "re-opened");
         assert_eq!(
             b.admit(after + Duration::from_secs(30)),
-            Admit::Pass,
+            Admit::Probe,
             "the fresh cooldown runs from the failed probe"
         );
     }
@@ -615,8 +637,8 @@ mod breaker_tests {
         let mut b = Breaker::new(cfg(1, 2)); // 2 probes per episode
         b.record(Class::Failure, now);
         let after = now + Duration::from_secs(30);
-        assert_eq!(b.admit(after), Admit::Pass, "probe 1");
-        assert_eq!(b.admit(after), Admit::Pass, "probe 2");
+        assert_eq!(b.admit(after), Admit::Probe, "probe 1");
+        assert_eq!(b.admit(after), Admit::Probe, "probe 2");
         assert_eq!(b.admit(after), Admit::Reject, "no probe 3 (gate)");
         b.record(Class::Success, after); // 1 of 2
         assert_eq!(
@@ -636,7 +658,7 @@ mod breaker_tests {
         let after = now + Duration::from_secs(30);
         assert_eq!(
             b.admit(after),
-            Admit::Pass,
+            Admit::Probe,
             "cooldown elapsed → probe admitted"
         );
         b.on_abandoned_probe(after); // the probe's future was dropped
@@ -647,7 +669,7 @@ mod breaker_tests {
         );
         assert_eq!(
             b.admit(after + Duration::from_secs(30)),
-            Admit::Pass,
+            Admit::Probe,
             "self-healed after a fresh cooldown from the abandonment"
         );
     }
@@ -681,7 +703,7 @@ mod breaker_tests {
         );
         assert_eq!(
             b.admit(now + Duration::from_secs(30)),
-            Admit::Pass,
+            Admit::Probe,
             "original cooldown still elapses on schedule"
         );
     }
@@ -696,6 +718,24 @@ mod breaker_tests {
             b.admit(now),
             Admit::Reject,
             "the Open no-op arm must never un-trip a freshly-opened circuit"
+        );
+    }
+
+    #[test]
+    fn admit_distinguishes_a_probe_from_a_normal_pass() {
+        let now = Instant::now();
+        let mut b = Breaker::new(cfg(1, 1));
+        assert_eq!(
+            b.admit(now),
+            Admit::Pass,
+            "closed → normal pass, not a probe"
+        );
+        b.record(Class::Failure, now); // → Open
+        let after = now + Duration::from_secs(30);
+        assert_eq!(
+            b.admit(after),
+            Admit::Probe,
+            "half-open admission is a probe"
         );
     }
 }
@@ -1018,6 +1058,87 @@ mod service_tests {
         assert!(
             futures_util::poll!(fut2.as_mut()).is_pending(),
             "self-healed: a fresh probe is admitted rather than wedged at probes_left:0"
+        );
+    }
+
+    // Call 0 hangs (the Closed-era call we cancel), call 1 fails (trips the
+    // breaker), call 2 hangs (the live Half-Open probe), call 3+ succeed.
+    #[derive(Clone)]
+    struct RaceLeaf {
+        calls: Arc<AtomicUsize>,
+    }
+    impl RaceLeaf {
+        fn new() -> Self {
+            Self {
+                calls: Arc::new(AtomicUsize::new(0)),
+            }
+        }
+    }
+    impl Service<http::Request<Bytes>> for RaceLeaf {
+        type Response = http::Response<()>;
+        type Error = HttpError;
+        #[allow(clippy::manual_async_fn)]
+        fn call(
+            &self,
+            _req: http::Request<Bytes>,
+        ) -> impl Future<Output = Result<Self::Response, HttpError>> + Send {
+            let i = self.calls.fetch_add(1, Ordering::Relaxed);
+            async move {
+                match i {
+                    1 => Err(err_of(ErrorKind::Connection)),
+                    0 | 2 => std::future::pending::<Result<http::Response<()>, HttpError>>().await,
+                    _ => Ok(http::Response::new(())),
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn a_cancelled_non_probe_call_does_not_reopen_a_concurrent_half_open() {
+        let timer = MockTimer::new();
+        let leaf = RaceLeaf::new();
+        let svc =
+            CircuitBreakerLayer::new(cfg(1, secs(30), secs(900), 1), timer.clone()).layer(leaf);
+
+        // 1. A Closed-state call is admitted and parks (call 0 hangs). It is NOT a
+        //    probe, so its guard must never be armed. `Box::pin` so `drop` runs the
+        //    future's destructor at the point we choose.
+        let mut closed_call = Box::pin(svc.call(bare_req()));
+        assert!(
+            futures_util::poll!(closed_call.as_mut()).is_pending(),
+            "the Closed-state call is admitted and parks on the hanging leaf"
+        );
+
+        // 2. A second call fails, tripping the breaker Open (call 1).
+        assert!(matches!(
+            svc.call(bare_req()).await.unwrap_err(),
+            HttpError::Connection(_)
+        ));
+
+        // 3. Cooldown elapses; the real probe is admitted and parks (call 2 hangs) →
+        //    Half-Open with the single probe budget spent.
+        timer.advance(secs(30));
+        let mut probe = Box::pin(svc.call(bare_req()));
+        assert!(
+            futures_util::poll!(probe.as_mut()).is_pending(),
+            "the probe is admitted and parks on the hanging leaf"
+        );
+
+        // 4. Cancel the Closed-era call. With probe-only guarding its guard was never
+        //    armed, so this must NOT reopen the live Half-Open episode (M1).
+        drop(closed_call);
+
+        // 5. Even after a full cooldown the episode is intact (Half-Open, probe budget
+        //    spent) → still fast-rejects. Had the drop reopened the circuit (the bug),
+        //    the fresh cooldown would have elapsed and this call would reach the leaf
+        //    (call 3 → Ok) instead of being rejected.
+        timer.advance(secs(30));
+        assert!(
+            matches!(
+                svc.call(bare_req()).await.unwrap_err(),
+                HttpError::CircuitOpen
+            ),
+            "a cancelled non-probe call must not reopen the live Half-Open episode"
         );
     }
 }

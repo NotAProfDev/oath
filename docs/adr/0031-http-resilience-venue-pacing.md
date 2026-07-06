@@ -190,3 +190,20 @@ Wraps **ADR-0030** (the HTTP contract) and rests on **ADR-0029** (`Timer`, compo
 no `dyn`). Defers order retransmission to **ADR-0022 / 0006 / 0026**. Routes net-layer
 observability to the **ADR-0014** Telemetry plane. Glossary unchanged — implementation
 vocabulary only; IBKR pacing values are reference data for the adapter, not domain terms.
+
+## Amendments (2026-07-06)
+
+Recorded append-only (the decision text above is unedited).
+
+1. **`classify` distinguishes a `Throttled` *error* from a `429` *response* (C1 fix).**
+   §5 wrote the trip trigger as "immediately on `Throttled`/429", conflating two different
+   things. `HttpError::Throttled` is produced **only locally** by `RateLimit` — a `max_wait`
+   breach, an absent `RateScope`, or a missing bucket, where the request is *never sent* — so
+   it carries no host-health signal. Because `CircuitBreaker` sits **outside** `RateLimit`,
+   mapping that error to a trip let a single local pacing rejection open the venue-wide
+   breaker for the full `throttle_cooldown` (the ~15-minute penalty box): a self-inflicted
+   outage. **Clarified:** only a venue **`429` *response*** (`Ok(Response)` with status 429)
+   trips the breaker (`Class::TripNow`); a `Throttled` *error* is `Class::Ignored` (never
+   trips, and never resets the Closed-state streak). The proactive-limiter (`RateLimit`) /
+   reactive-breaker (`CircuitBreaker`) split of §5 is otherwise unchanged. See the
+   [deep-review](../superpowers/plans/2026-07-06-net-http-deep-review.md) finding C1.

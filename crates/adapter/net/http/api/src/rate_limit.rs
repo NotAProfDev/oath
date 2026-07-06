@@ -229,7 +229,7 @@ where
         // Collect applicable buckets, rate-type first (ADR-0031 §3 acquire order).
         let mut rate: Vec<&Bucket> = Vec::new();
         let mut conc: Vec<&Bucket> = Vec::new();
-        let deadline = self.timer.now() + self.max_wait;
+        let deadline = crate::clock::deadline(self.timer.now(), self.max_wait);
 
         // global first, then local
         if want_global {

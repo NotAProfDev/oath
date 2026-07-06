@@ -547,4 +547,44 @@ mod tests {
             "the fail-closed request never reached the leaf"
         );
     }
+
+    // 6. C1 regression — a purely LOCAL pacing rejection (a `Throttled` error, the
+    //    request never sent) must NEVER trip the venue-wide breaker. Fire more local
+    //    throttles than failure_threshold, then a well-formed request must still
+    //    reach the leaf (breaker stayed Closed), not be fast-rejected as CircuitOpen.
+    #[tokio::test]
+    async fn repeated_local_throttle_never_opens_the_breaker() {
+        let timer = MockTimer::new();
+        let leaf = ScriptLeaf::new(timer.clone(), vec![Step::Status(200)]);
+        let svc = stack(
+            leaf.clone(),
+            http_cfg(1, Duration::from_secs(30), Duration::ZERO), // failure_threshold = 3
+            timer,
+            NoAuth,
+            rate_cfg(),
+        )
+        .expect("total config");
+        for _ in 0..5 {
+            // No RateScope → RateLimit fails closed with a local Throttled.
+            let bare = http::Request::builder()
+                .method("GET")
+                .uri("/x")
+                .body(Bytes::new())
+                .unwrap();
+            assert!(
+                matches!(svc.call(bare).await, Err(HttpError::Throttled)),
+                "a local pacing reject must stay Throttled, never escalate to CircuitOpen"
+            );
+        }
+        let resp = svc
+            .call(req(Scope::Global, None))
+            .await
+            .expect("breaker stayed Closed after local throttles");
+        assert_eq!(resp.status(), http::StatusCode::OK);
+        assert_eq!(
+            leaf.calls(),
+            1,
+            "only the well-formed request reached the leaf"
+        );
+    }
 }
