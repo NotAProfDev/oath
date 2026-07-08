@@ -752,6 +752,32 @@ mod tests {
             Duration::from_secs(30)
         );
     }
+
+    #[test]
+    fn backoff_ceiling_doubles_each_attempt_until_the_cap() {
+        // base = 10ms, cap = 10s (high enough that clamping never fires for attempts
+        // 1..=4): the ceiling must be base·2^(attempt-1) — 10, 20, 40, 80 ms. Every
+        // loop-driving retry test uses base == cap, so the doubling law is otherwise
+        // unpinned; a 2^attempt (overshoot) or "no doubling" bug lands here.
+        let base = Duration::from_millis(10);
+        let cap = Duration::from_secs(10);
+        assert_eq!(
+            super::backoff_ceiling(base, cap, 1),
+            Duration::from_millis(10)
+        );
+        assert_eq!(
+            super::backoff_ceiling(base, cap, 2),
+            Duration::from_millis(20)
+        );
+        assert_eq!(
+            super::backoff_ceiling(base, cap, 3),
+            Duration::from_millis(40)
+        );
+        assert_eq!(
+            super::backoff_ceiling(base, cap, 4),
+            Duration::from_millis(80)
+        );
+    }
 }
 
 #[cfg(test)]
