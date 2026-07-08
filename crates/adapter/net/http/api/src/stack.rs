@@ -129,7 +129,8 @@ impl fmt::Debug for HttpConfig {
 ///     circuit_breaker: CircuitBreakerConfig {
 ///         failure_threshold: NonZeroU32::new(3).unwrap(),
 ///         cooldown: Duration::from_secs(30),
-///         throttle_cooldown: Duration::from_secs(900),
+///         retry_after_fallback: Duration::from_secs(900),
+///         retry_after_cap: Duration::from_secs(1800),
 ///         half_open_probes: NonZeroU32::new(1).unwrap(),
 ///     },
 ///     headers: http::HeaderMap::new(),
@@ -180,7 +181,8 @@ where
 
 /// Reject degenerate zero `Duration`s that would silently defeat the layer they
 /// configure: `timeout == 0` (every send instantly `Timeout`) and the breaker's
-/// `cooldown`/`throttle_cooldown == 0` (Open collapses straight back to Half-Open).
+/// `cooldown`/`retry_after_fallback`/`retry_after_cap == 0` (Open collapses straight
+/// back to Half-Open).
 ///
 /// `rate_limit_max_wait` and the retry backoff (`base`/`cap`) may legitimately be
 /// zero (throttle-immediately / no-backoff), so they are **not** checked.
@@ -194,10 +196,13 @@ const fn validate_config(cfg: &HttpConfig) -> Result<(), BuildError> {
     if cfg.circuit_breaker.cooldown.is_zero() {
         return Err(BuildError::ZeroDuration("circuit_breaker.cooldown"));
     }
-    if cfg.circuit_breaker.throttle_cooldown.is_zero() {
+    if cfg.circuit_breaker.retry_after_fallback.is_zero() {
         return Err(BuildError::ZeroDuration(
-            "circuit_breaker.throttle_cooldown",
+            "circuit_breaker.retry_after_fallback",
         ));
+    }
+    if cfg.circuit_breaker.retry_after_cap.is_zero() {
+        return Err(BuildError::ZeroDuration("circuit_breaker.retry_after_cap"));
     }
     Ok(())
 }
@@ -382,7 +387,8 @@ mod tests {
             circuit_breaker: CircuitBreakerConfig {
                 failure_threshold: NonZeroU32::new(3).unwrap(),
                 cooldown: Duration::from_secs(30),
-                throttle_cooldown: Duration::from_secs(900),
+                retry_after_fallback: Duration::from_secs(900),
+                retry_after_cap: Duration::from_secs(1800),
                 half_open_probes: NonZeroU32::new(1).unwrap(),
             },
             headers: http::HeaderMap::new(),
@@ -490,15 +496,15 @@ mod tests {
         };
         assert_eq!(err, BuildError::ZeroDuration("circuit_breaker.cooldown"));
 
-        // throttle_cooldown == 0 would collapse the 429 penalty box.
+        // retry_after_fallback == 0 would collapse the 429 penalty box.
         let mut cfg = http_cfg(1, Duration::from_secs(1), Duration::ZERO);
-        cfg.circuit_breaker.throttle_cooldown = Duration::ZERO;
+        cfg.circuit_breaker.retry_after_fallback = Duration::ZERO;
         let Err(err) = stack(leaf(), cfg, timer.clone(), NoAuth, rate_cfg()) else {
-            panic!("throttle_cooldown == 0 must be a BuildError");
+            panic!("retry_after_fallback == 0 must be a BuildError");
         };
         assert_eq!(
             err,
-            BuildError::ZeroDuration("circuit_breaker.throttle_cooldown")
+            BuildError::ZeroDuration("circuit_breaker.retry_after_fallback")
         );
 
         // Sanity: rate_limit_max_wait == 0 is legitimate (throttle-immediately) and
@@ -513,6 +519,22 @@ mod tests {
             )
             .is_ok(),
             "max_wait == 0 is valid, not a zero-Duration error"
+        );
+    }
+
+    #[test]
+    fn zero_retry_after_cap_is_a_build_error() {
+        // A zero cap would honor every 429 Retry-After as an immediate probe.
+        let timer = MockTimer::new();
+        let leaf = ScriptLeaf::new(timer.clone(), vec![Step::Status(200)]);
+        let mut cfg = http_cfg(1, Duration::from_secs(1), Duration::ZERO);
+        cfg.circuit_breaker.retry_after_cap = Duration::ZERO;
+        let Err(err) = stack(leaf, cfg, timer, NoAuth, rate_cfg()) else {
+            panic!("retry_after_cap == 0 must be a BuildError");
+        };
+        assert_eq!(
+            err,
+            BuildError::ZeroDuration("circuit_breaker.retry_after_cap")
         );
     }
 

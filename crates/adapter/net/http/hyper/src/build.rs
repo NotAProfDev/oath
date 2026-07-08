@@ -38,7 +38,7 @@ use std::fmt;
 /// let cfg = HttpConfig {
 ///     timeout: Duration::from_secs(5),
 ///     retry: RetryConfig { max_attempts: NonZeroU32::new(3).unwrap(), base: Duration::from_millis(50), cap: Duration::from_secs(1), seed: 1 },
-///     circuit_breaker: CircuitBreakerConfig { failure_threshold: NonZeroU32::new(3).unwrap(), cooldown: Duration::from_secs(30), throttle_cooldown: Duration::from_secs(900), half_open_probes: NonZeroU32::new(1).unwrap() },
+///     circuit_breaker: CircuitBreakerConfig { failure_threshold: NonZeroU32::new(3).unwrap(), cooldown: Duration::from_secs(30), retry_after_fallback: Duration::from_secs(900), retry_after_cap: Duration::from_secs(1800), half_open_probes: NonZeroU32::new(1).unwrap() },
 ///     headers: http::HeaderMap::new(),
 ///     rate_limit_max_wait: Duration::from_secs(0),
 /// };
@@ -127,7 +127,8 @@ mod tests {
             circuit_breaker: CircuitBreakerConfig {
                 failure_threshold: NonZeroU32::new(3).unwrap(),
                 cooldown: Duration::from_secs(30),
-                throttle_cooldown: Duration::from_secs(900),
+                retry_after_fallback: Duration::from_secs(900),
+                retry_after_cap: Duration::from_secs(1800),
                 half_open_probes: NonZeroU32::new(1).unwrap(),
             },
             headers: http::HeaderMap::new(),
@@ -296,7 +297,7 @@ mod tests {
 
     // A real venue 429 arrives as Ok(status = 429). A single 429 maps to
     // Class::TripNow in the breaker (circuit_breaker.rs classify), which trips
-    // immediately on the long throttle_cooldown regardless of failure_threshold; the
+    // immediately on the long retry_after_fallback regardless of failure_threshold; the
     // next call fast-rejects with CircuitOpen without a send.
     #[tokio::test]
     async fn a_real_429_trips_the_breaker_through_the_full_stack() {

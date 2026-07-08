@@ -289,3 +289,10 @@ carries the full reasoning.
     regression-tested over an inline recording leaf + `MockTimer` (not `MockClient`,
     which would close the net-http-mock → net-http-api dev-dep cycle and cannot script
     sequences). No new dependency; no existing-layer change.
+12. **`Retry-After` honoring (delay-seconds) landed; `throttle_cooldown` renamed.**
+    Amendment #8 deferred "`Retry-After` parsing"; its `delay-seconds` half now ships —
+    the `Retry` layer honors it as a `5xx` backoff floor and the `CircuitBreaker` uses
+    it for the `429` reopen deadline (details + rationale in **ADR-0031 Amendment #2**).
+    The breaker's `throttle_cooldown` field is renamed **`retry_after_fallback`**, and a
+    new **`retry_after_cap`** bounds an honored value. The `HTTP-date` form and
+    alternate/absolute headers stay deferred (they need a wall-clock `Timer` seam).

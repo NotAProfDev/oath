@@ -145,7 +145,7 @@ pub enum BuildError {
     MultipleConcurrency,
     /// A `Duration` config field that must be positive is zero — it would silently
     /// defeat the layer it configures (`timeout == 0` fails every send instantly;
-    /// `cooldown`/`throttle_cooldown == 0` collapses the reactive breaker's Open
+    /// `cooldown`/`retry_after_fallback == 0` collapses the reactive breaker's Open
     /// state). Symmetric with the pacing-parameter validation (deep review §2A).
     #[error("config field `{0}` must be a positive Duration, but is zero")]
     ZeroDuration(&'static str),

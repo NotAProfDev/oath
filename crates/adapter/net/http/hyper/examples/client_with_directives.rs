@@ -65,7 +65,8 @@ async fn main() {
         circuit_breaker: CircuitBreakerConfig {
             failure_threshold: NonZeroU32::new(3).unwrap(),
             cooldown: Duration::from_secs(30),
-            throttle_cooldown: Duration::from_secs(900),
+            retry_after_fallback: Duration::from_secs(900),
+            retry_after_cap: Duration::from_secs(1800),
             half_open_probes: NonZeroU32::new(1).unwrap(),
         },
         headers: http::HeaderMap::new(),

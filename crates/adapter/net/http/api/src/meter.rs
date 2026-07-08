@@ -46,6 +46,8 @@ const RETRY_ATTEMPTS: &str = "http_retry_attempts_total";
 const PERMIT_WAIT_SECONDS: &str = "http_rate_limit_permit_wait_seconds";
 /// Histogram: retry backoff delay in seconds, by `route`.
 const BACKOFF_SECONDS: &str = "http_retry_backoff_seconds";
+/// Counter: honored `Retry-After` directives, labelled by `site` (`"retry" | "breaker"`).
+const RETRY_AFTER_HONORED: &str = "http_retry_after_honored_total";
 
 /// The bounded `route` label for one request: the stamped [`RouteTemplate`], or the
 /// fixed `"other"` when absent — never the raw path.
@@ -80,9 +82,14 @@ pub(crate) fn backoff(route: Cow<'static, str>, delay: Duration) {
     metrics::histogram!(BACKOFF_SECONDS, "route" => route).record(delay.as_secs_f64());
 }
 
+/// Count one honored `Retry-After` directive at `site` (`"retry"` or `"breaker"`).
+pub(crate) fn retry_after_honored(site: &'static str) {
+    metrics::counter!(RETRY_AFTER_HONORED, "site" => site).increment(1);
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{RouteTemplate, breaker_transition, route_label, throttled};
+    use super::{RouteTemplate, breaker_transition, retry_after_honored, route_label, throttled};
     use bytes::Bytes;
     use metrics_util::debugging::{DebugValue, DebuggingRecorder};
 
@@ -147,6 +154,30 @@ mod tests {
                 .key()
                 .labels()
                 .any(|l| l.key() == "route" && l.value() == "/iserver/marketdata/history"),
+        );
+        assert_eq!(counter.3, DebugValue::Counter(1));
+    }
+
+    #[test]
+    fn retry_after_honored_carries_the_site_label() {
+        let recorder = DebuggingRecorder::new();
+        let snap = recorder.snapshotter();
+        metrics::with_local_recorder(&recorder, || {
+            retry_after_honored("breaker");
+        });
+        let counter = snap
+            .snapshot()
+            .into_vec()
+            .into_iter()
+            .find(|(k, _, _, _)| k.key().name() == "http_retry_after_honored_total")
+            .expect("counter emitted");
+        assert!(
+            counter
+                .0
+                .key()
+                .labels()
+                .any(|l| l.key() == "site" && l.value() == "breaker"),
+            "labelled site=breaker"
         );
         assert_eq!(counter.3, DebugValue::Counter(1));
     }
