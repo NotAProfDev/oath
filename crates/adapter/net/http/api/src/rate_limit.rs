@@ -747,9 +747,11 @@ mod tests {
 
     #[tokio::test]
     async fn refill_rate_is_exact_not_just_a_lower_bound() {
-        // Snapshot = 2 tokens/sec, burst 2. Drain both; advance EXACTLY 1s (→ +2
-        // tokens, capped at burst 2); admit exactly 2; the 3rd must throttle. A 2x/
-        // over-refill bug (or a refill that ignores the burst cap) would admit a 3rd.
+        // Snapshot = 2 tokens/sec, burst 2. Drain both, then advance ONLY 500ms so the
+        // correct refill is exactly 1 token (0.5s × 2/s = 1) — strictly BELOW burst, so
+        // the burst cap can't mask an inflated rate. Admit exactly 1; the next throttles.
+        // A 2x-over-refill bug credits 2 tokens in 500ms → admits a 2nd → this fails,
+        // WITHOUT needing the burst cap to also be broken.
         let timer = MockTimer::new();
         let svc = layer(timer.clone(), Duration::from_secs(0)).layer(Leaf::ok(b"ok"));
         svc.call(req(RateScope::Local(Key::Snapshot)))
@@ -764,14 +766,10 @@ mod tests {
                 .unwrap_err(),
             HttpError::Throttled
         ));
-
-        timer.advance(Duration::from_secs(1)); // +2 tokens, but burst caps at 2
+        timer.advance(Duration::from_millis(500)); // exactly 1 token, < burst 2
         svc.call(req(RateScope::Local(Key::Snapshot)))
             .await
-            .expect("refilled 1");
-        svc.call(req(RateScope::Local(Key::Snapshot)))
-            .await
-            .expect("refilled 2");
+            .expect("exactly 1 token refilled");
         assert!(
             matches!(
                 svc.call(req(RateScope::Local(Key::Snapshot)))
@@ -779,7 +777,7 @@ mod tests {
                     .unwrap_err(),
                 HttpError::Throttled
             ),
-            "exactly 2 tokens refilled in 1s (rate=2, burst-capped) — a 3rd must throttle"
+            "only 1 token accrued in 500ms (rate=2/s) — a 2nd admit would mean an over-refill"
         );
     }
 
