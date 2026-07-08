@@ -805,4 +805,52 @@ mod tests {
             "a quarter-period must not refill a whole token"
         );
     }
+
+    #[tokio::test]
+    async fn both_scope_spends_global_and_local_in_one_acquire() {
+        // Both(Snapshot) must acquire the global bucket AND the Snapshot local bucket.
+        // Snapshot burst = 2 is the tighter of the two (global burst = 10), so the 3rd
+        // Both request throttles on the drained LOCAL bucket — proving both buckets are
+        // consulted (a Both that only spent global would admit up to 10).
+        let timer = MockTimer::new();
+        let svc = layer(timer.clone(), Duration::from_secs(0)).layer(Leaf::ok(b"ok"));
+        svc.call(req(RateScope::Both(Key::Snapshot)))
+            .await
+            .expect("1 (global+local)");
+        svc.call(req(RateScope::Both(Key::Snapshot)))
+            .await
+            .expect("2 (global+local)");
+        assert!(
+            matches!(
+                svc.call(req(RateScope::Both(Key::Snapshot)))
+                    .await
+                    .unwrap_err(),
+                HttpError::Throttled
+            ),
+            "3rd Both throttles on the drained LOCAL bucket → both buckets were spent"
+        );
+    }
+
+    #[tokio::test]
+    async fn both_scope_throttles_when_only_the_global_bucket_is_empty() {
+        // Symmetric: drain the GLOBAL bucket (10/s) via Global-scoped calls, then a
+        // Both(History) request — whose local side (concurrency) is free — must still
+        // throttle, proving the global side is acquired first and gates a Both request.
+        let timer = MockTimer::new();
+        let svc = layer(timer.clone(), Duration::from_secs(0)).layer(Leaf::ok(b"ok"));
+        for _ in 0..10 {
+            svc.call(req(RateScope::Global))
+                .await
+                .expect("drain global burst 10");
+        }
+        assert!(
+            matches!(
+                svc.call(req(RateScope::Both(Key::History)))
+                    .await
+                    .unwrap_err(),
+                HttpError::Throttled
+            ),
+            "Both must acquire the (empty) global bucket before its local side"
+        );
+    }
 }
