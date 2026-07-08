@@ -318,6 +318,22 @@ impl<T> CircuitBreakerLayer<T> {
     /// **Infallible** — `NonZeroU32` makes the two counts "≥ 1" a type invariant
     /// (contrast `RateLimitLayer::new`, which validates a config map). Not `const`:
     /// it allocates the shared `Arc<Mutex<Breaker>>`.
+    ///
+    /// # Example
+    /// ```
+    /// use oath_adapter_net_http_api::{CircuitBreakerLayer, CircuitBreakerConfig};
+    /// use oath_adapter_net_mock::MockTimer;
+    /// use std::num::NonZeroU32;
+    /// use std::time::Duration;
+    ///
+    /// let cfg = CircuitBreakerConfig {
+    ///     failure_threshold: NonZeroU32::new(3).unwrap(),
+    ///     cooldown: Duration::from_secs(30),
+    ///     throttle_cooldown: Duration::from_secs(900),
+    ///     half_open_probes: NonZeroU32::new(1).unwrap(),
+    /// };
+    /// let _layer = CircuitBreakerLayer::new(cfg, MockTimer::new());
+    /// ```
     #[must_use]
     pub fn new(cfg: CircuitBreakerConfig, timer: T) -> Self {
         Self {

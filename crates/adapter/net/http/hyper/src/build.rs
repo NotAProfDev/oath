@@ -19,6 +19,45 @@ use std::fmt;
 /// # Errors
 /// [`BuildError`] from `stack()` if `rate_limits` is not total over `K::all()`,
 /// a policy is out of range, or the concurrency-singleton invariant is breached.
+///
+/// # Example
+/// ```no_run
+/// use oath_adapter_net_http_hyper::{build, ConnConfig, TlsTrust, TokioTimer};
+/// use oath_adapter_net_http_api::{
+///     HttpConfig, NoAuth, RateKey, RateLimitConfig, LimitDecl, LimitPolicy,
+///     RetryConfig, CircuitBreakerConfig,
+/// };
+/// use std::collections::HashMap;
+/// use std::num::NonZeroU32;
+/// use std::time::Duration;
+///
+/// #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// enum Endpoint { Rest }
+/// impl RateKey for Endpoint { fn all() -> &'static [Self] { &[Endpoint::Rest] } }
+///
+/// let cfg = HttpConfig {
+///     timeout: Duration::from_secs(5),
+///     retry: RetryConfig { max_attempts: NonZeroU32::new(3).unwrap(), base: Duration::from_millis(50), cap: Duration::from_secs(1), seed: 1 },
+///     circuit_breaker: CircuitBreakerConfig { failure_threshold: NonZeroU32::new(3).unwrap(), cooldown: Duration::from_secs(30), throttle_cooldown: Duration::from_secs(900), half_open_probes: NonZeroU32::new(1).unwrap() },
+///     headers: http::HeaderMap::new(),
+///     rate_limit_max_wait: Duration::from_secs(0),
+/// };
+/// let rates = RateLimitConfig {
+///     global: LimitPolicy::TokenBucket { rate: 1000, per: Duration::from_secs(1), burst: 1000 },
+///     local: HashMap::from([(Endpoint::Rest, LimitDecl::GlobalOnly)]),
+/// };
+/// let conn = ConnConfig {
+///     pool_max_idle_per_host: 4,
+///     pool_idle_timeout: Duration::from_secs(30),
+///     connect_timeout: Duration::from_secs(2),
+///     tls_trust: TlsTrust::WebpkiRoots,
+///     allow_http: false,
+///     http2_keep_alive_interval: None,
+///     http2_keep_alive_timeout: Duration::from_secs(10),
+///     http2_keep_alive_while_idle: false,
+/// };
+/// let _client = build(cfg, TokioTimer, NoAuth, rates, conn).expect("valid config");
+/// ```
 pub fn build<T, A, K>(
     cfg: HttpConfig,
     timer: T,

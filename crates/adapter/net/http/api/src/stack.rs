@@ -70,6 +70,78 @@ impl fmt::Debug for HttpConfig {
 /// [`BuildError`] propagated from `RateLimitLayer::new` if `rate_limits` is not
 /// total over `K::all()`, any policy is out of range, or the concurrency-singleton
 /// invariant is breached.
+///
+/// # Example
+/// Assemble the stack over any leaf [`Service`](crate::Service). In production the hyper backend's
+/// `build()` wraps this over a pooled TLS leaf; here a trivial always-200 leaf
+/// stands in to keep the example self-contained:
+/// ```
+/// use oath_adapter_net_http_api::{
+///     stack, CircuitBreakerConfig, HttpConfig, HttpError, LimitDecl, LimitPolicy, NoAuth,
+///     RateKey, RateLimitConfig, RetryConfig, Service,
+/// };
+/// use oath_adapter_net_mock::MockTimer;
+/// use bytes::Bytes;
+/// use http_body::{Body, Frame};
+/// use std::collections::HashMap;
+/// use std::num::NonZeroU32;
+/// use std::pin::Pin;
+/// use std::task::{Context, Poll};
+/// use std::time::Duration;
+///
+/// // A trivial leaf: an empty body, always 200. In production this is the hyper leaf.
+/// struct EmptyBody;
+/// impl Body for EmptyBody {
+///     type Data = Bytes;
+///     type Error = HttpError;
+///     fn poll_frame(
+///         self: Pin<&mut Self>,
+///         _: &mut Context<'_>,
+///     ) -> Poll<Option<Result<Frame<Bytes>, HttpError>>> {
+///         Poll::Ready(None)
+///     }
+/// }
+/// #[derive(Clone)]
+/// struct Leaf;
+/// impl Service<http::Request<Bytes>> for Leaf {
+///     type Response = http::Response<EmptyBody>;
+///     type Error = HttpError;
+///     fn call(
+///         &self,
+///         _req: http::Request<Bytes>,
+///     ) -> impl std::future::Future<Output = Result<Self::Response, HttpError>> + Send {
+///         async { Ok(http::Response::new(EmptyBody)) }
+///     }
+/// }
+///
+/// #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// enum Endpoint { Rest }
+/// impl RateKey for Endpoint { fn all() -> &'static [Self] { &[Endpoint::Rest] } }
+///
+/// let cfg = HttpConfig {
+///     timeout: Duration::from_secs(5),
+///     retry: RetryConfig {
+///         max_attempts: NonZeroU32::new(3).unwrap(),
+///         base: Duration::from_millis(50),
+///         cap: Duration::from_secs(1),
+///         seed: 1,
+///     },
+///     circuit_breaker: CircuitBreakerConfig {
+///         failure_threshold: NonZeroU32::new(3).unwrap(),
+///         cooldown: Duration::from_secs(30),
+///         throttle_cooldown: Duration::from_secs(900),
+///         half_open_probes: NonZeroU32::new(1).unwrap(),
+///     },
+///     headers: http::HeaderMap::new(),
+///     rate_limit_max_wait: Duration::from_secs(0),
+/// };
+/// let rates = RateLimitConfig {
+///     global: LimitPolicy::TokenBucket { rate: 1000, per: Duration::from_secs(1), burst: 1000 },
+///     local: HashMap::from([(Endpoint::Rest, LimitDecl::GlobalOnly)]),
+/// };
+/// let client = stack(Leaf, cfg, MockTimer::new(), NoAuth, rates);
+/// assert!(client.is_ok());
+/// ```
 // `rate_limits` is only borrowed internally (`RateLimitLayer::new` takes `&RateLimitConfig<K>`),
 // but the public signature takes it by value to match `cfg`'s "config consumed once at boot"
 // shape — the caller hands the whole aggregate over and is done with it.

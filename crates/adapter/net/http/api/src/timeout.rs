@@ -45,6 +45,15 @@ impl<T> TimeoutLayer<T> {
     ///
     /// The default bounds every request lacking a [`RequestTimeout`] extension.
     /// Infallible — every [`Duration`] is a valid deadline (no config to check).
+    ///
+    /// # Example
+    /// ```
+    /// use oath_adapter_net_http_api::TimeoutLayer;
+    /// use oath_adapter_net_mock::MockTimer;
+    /// use std::time::Duration;
+    ///
+    /// let _layer = TimeoutLayer::new(Duration::from_secs(5), MockTimer::new());
+    /// ```
     #[must_use]
     pub const fn new(default: Duration, timer: T) -> Self {
         Self { default, timer }

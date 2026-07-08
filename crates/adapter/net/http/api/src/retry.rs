@@ -142,6 +142,22 @@ impl<T> RetryLayer<T> {
     /// **Infallible** — `RetryConfig::max_attempts` is `NonZeroU32` (≥ 1 send is a
     /// type invariant) and `cap < base` is harmless (the ceiling just never grows
     /// past `cap`), so there is nothing to validate (contrast `RateLimitLayer::new`).
+    ///
+    /// # Example
+    /// ```
+    /// use oath_adapter_net_http_api::{RetryLayer, RetryConfig};
+    /// use oath_adapter_net_mock::MockTimer;
+    /// use std::num::NonZeroU32;
+    /// use std::time::Duration;
+    ///
+    /// let cfg = RetryConfig {
+    ///     max_attempts: NonZeroU32::new(3).unwrap(),
+    ///     base: Duration::from_millis(50),
+    ///     cap: Duration::from_secs(1),
+    ///     seed: 1,
+    /// };
+    /// let _layer = RetryLayer::new(cfg, MockTimer::new());
+    /// ```
     #[must_use]
     pub const fn new(cfg: RetryConfig, timer: T) -> Self {
         Self { cfg, timer }

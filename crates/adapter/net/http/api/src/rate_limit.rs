@@ -19,6 +19,20 @@
 /// only" is said with an explicit [`RateScope::Global`]; opt out with
 /// [`RateScope::None`]. `Clone` so it survives the per-attempt request clone
 /// `Retry` performs (Slice 1).
+///
+/// # Example
+/// Stamp the mandatory per-request pacing directive before calling the client
+/// (an absent `RateScope` fails closed with [`HttpError::Throttled`]):
+/// ```
+/// use oath_adapter_net_http_api::RateScope;
+///
+/// #[derive(Clone, Copy)]
+/// enum Endpoint { Orders }
+///
+/// let mut req = http::Request::new(bytes::Bytes::new());
+/// req.extensions_mut().insert(RateScope::Local(Endpoint::Orders));
+/// assert!(req.extensions().get::<RateScope<Endpoint>>().is_some());
+/// ```
 #[derive(Debug, Clone)]
 pub enum RateScope<K> {
     /// Acquire nothing — the **explicit** unlimited opt-out.
@@ -129,6 +143,25 @@ impl<K, T> RateLimitLayer<K, T> {
     /// # Errors
     /// Propagates [`validate_coverage`]'s and [`validate_concurrency_singleton`]'s
     /// [`BuildError`].
+    ///
+    /// # Example
+    /// ```
+    /// use oath_adapter_net_http_api::{RateLimitConfig, RateLimitLayer, LimitDecl, LimitPolicy, RateKey};
+    /// use oath_adapter_net_mock::MockTimer;
+    /// use std::collections::HashMap;
+    /// use std::time::Duration;
+    ///
+    /// #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+    /// enum Endpoint { Orders }
+    /// impl RateKey for Endpoint { fn all() -> &'static [Self] { &[Endpoint::Orders] } }
+    ///
+    /// let cfg = RateLimitConfig {
+    ///     global: LimitPolicy::TokenBucket { rate: 10, per: Duration::from_secs(1), burst: 10 },
+    ///     local: HashMap::from([(Endpoint::Orders, LimitDecl::GlobalOnly)]),
+    /// };
+    /// let layer = RateLimitLayer::new(&cfg, MockTimer::new(), Duration::from_secs(0));
+    /// assert!(layer.is_ok());
+    /// ```
     pub fn new(cfg: &RateLimitConfig<K>, timer: T, max_wait: Duration) -> Result<Self, BuildError>
     where
         K: RateKey + fmt::Debug,
