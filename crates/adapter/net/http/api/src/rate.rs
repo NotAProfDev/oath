@@ -154,8 +154,9 @@ pub enum BuildError {
 /// Validate that `cfg` is a **total**, param-sane pacing configuration.
 ///
 /// The `global` policy is valid, and every [`RateKey`] variant is classified
-/// with a valid policy (ADR-0034 §3). Slice 2's `stack()`/`build()` call this
-/// before assembling the stack, so a coverage gap is a boot failure.
+/// with a valid policy (ADR-0034 §3). `RateLimitLayer::new` calls this (and
+/// `stack()` transitively) before assembling the stack, so a coverage gap is a
+/// boot failure.
 ///
 /// # Errors
 /// [`BuildError::UndeclaredKey`] if a `K::all()` variant is absent from
