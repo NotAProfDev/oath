@@ -604,19 +604,24 @@ mod tests {
         leaf.shutdown().await; // nothing in flight → returns immediately
     }
 
-    // HTTP/2 keepalive (positive case): with `http2_keep_alive_interval` set and
-    // `while_idle = true`, a pooled h2 connection survives a brief idle gap and
-    // serves a second request over the SAME connection. The server is h2-only
-    // (ALPN = `h2`, an `http2::Builder`), so a request that succeeds necessarily
-    // spoke HTTP/2 — the `HTTP_2` version assertion makes that explicit. This
-    // asserts the keepalive knobs thread through `hyper_leaf` and that an idle h2
-    // connection stays usable; see the defer note below for what is NOT covered.
+    // HTTP/2 keepalive (plumbing case): with `http2_keep_alive_interval` set and
+    // `while_idle = true`, an h2-over-TLS connection stays usable across a brief
+    // idle gap. The server is h2-only (ALPN = `h2`, an `http2::Builder`), so a
+    // request that succeeds necessarily spoke HTTP/2 — the `HTTP_2` version
+    // assertion makes that explicit. This proves the keepalive knobs thread
+    // through `hyper_leaf` and that two requests succeed with keepalive
+    // configured. It does NOT isolate the PING's effect: `test_conn()`'s 30s
+    // `pool_idle_timeout` already covers the 250ms idle gap on its own, so the
+    // connection would plausibly survive even with keepalive disabled, and the
+    // test does not verify the second request reuses the same pooled connection.
+    // See the defer note below for the causation/reaping case this does not cover.
     //
     // Deferred (Tier-1 → tracking): the NEGATIVE h2-keepalive case — an idle h2
-    // connection being REAPED when keepalive is disabled — is not observed here. It
-    // depends on hyper's/OS idle-connection timing and is flake-prone as a unit
-    // test; the keepalive config knobs and the positive survival path are covered
-    // above.
+    // connection being REAPED when keepalive is disabled — is not observed here,
+    // nor is isolating keepalive's causal effect from the pool idle timeout noted
+    // above. Both depend on hyper's/OS idle-connection timing and are flake-prone
+    // as unit tests; the keepalive config knobs and the positive two-requests-
+    // succeed path are covered above.
     #[tokio::test]
     async fn h2_keepalive_connection_survives_an_idle_gap() {
         use hyper_util::rt::{TokioExecutor, TokioIo};
@@ -685,9 +690,10 @@ mod tests {
         let b1 = r1.into_body().collect().await.unwrap().to_bytes();
         assert_eq!(b1, Bytes::from_static(b"h2ok"));
 
-        // Idle longer than several keepalive intervals; the PING keeps the
-        // connection alive. A second request must still succeed over the pooled h2
-        // connection.
+        // Idle for several keepalive intervals (50ms each) — well within
+        // `test_conn()`'s 30s pool_idle_timeout, so this does not isolate the
+        // PING's effect. A second request must still succeed with keepalive
+        // configured.
         tokio::time::sleep(Duration::from_millis(250)).await;
         let r2 = leaf
             .call(http::Request::get(&url).body(Bytes::new()).unwrap())

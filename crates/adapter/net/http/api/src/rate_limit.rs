@@ -847,10 +847,12 @@ mod tests {
 
     #[tokio::test]
     async fn both_scope_spends_global_and_local_in_one_acquire() {
-        // Both(Snapshot) must acquire the global bucket AND the Snapshot local bucket.
-        // Snapshot burst = 2 is the tighter of the two (global burst = 10), so the 3rd
-        // Both request throttles on the drained LOCAL bucket — proving both buckets are
-        // consulted (a Both that only spent global would admit up to 10).
+        // Both(Snapshot) must acquire the Snapshot LOCAL bucket (burst = 2), the
+        // tighter of the two (global burst = 10): the 3rd Both request throttles on
+        // the drained local bucket, proving the local side is consulted (a Both that
+        // only spent global would admit up to 10). The companion test
+        // `both_scope_throttles_when_only_the_global_bucket_is_empty` pins the global
+        // side; together the pair proves a Both acquire spends both buckets.
         let timer = MockTimer::new();
         let svc = layer(timer.clone(), Duration::from_secs(0)).layer(Leaf::ok(b"ok"));
         svc.call(req(RateScope::Both(Key::Snapshot)))
@@ -866,7 +868,7 @@ mod tests {
                     .unwrap_err(),
                 HttpError::Throttled
             ),
-            "3rd Both throttles on the drained LOCAL bucket → both buckets were spent"
+            "3rd Both throttles on the drained LOCAL bucket → the local bucket is consulted"
         );
     }
 
@@ -874,7 +876,9 @@ mod tests {
     async fn both_scope_throttles_when_only_the_global_bucket_is_empty() {
         // Symmetric: drain the GLOBAL bucket (10/s) via Global-scoped calls, then a
         // Both(History) request — whose local side (concurrency) is free — must still
-        // throttle, proving the global side is acquired first and gates a Both request.
+        // throttle, proving the global side is consulted for a Both request. The
+        // companion test `both_scope_spends_global_and_local_in_one_acquire` pins the
+        // local side; together the pair proves a Both acquire spends both buckets.
         let timer = MockTimer::new();
         let svc = layer(timer.clone(), Duration::from_secs(0)).layer(Leaf::ok(b"ok"));
         for _ in 0..10 {
