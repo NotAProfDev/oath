@@ -744,4 +744,67 @@ mod tests {
             .unwrap()
             .expect("parked request refilled within max_wait and succeeded");
     }
+
+    #[tokio::test]
+    async fn refill_rate_is_exact_not_just_a_lower_bound() {
+        // Snapshot = 2 tokens/sec, burst 2. Drain both; advance EXACTLY 1s (→ +2
+        // tokens, capped at burst 2); admit exactly 2; the 3rd must throttle. A 2x/
+        // over-refill bug (or a refill that ignores the burst cap) would admit a 3rd.
+        let timer = MockTimer::new();
+        let svc = layer(timer.clone(), Duration::from_secs(0)).layer(Leaf::ok(b"ok"));
+        svc.call(req(RateScope::Local(Key::Snapshot)))
+            .await
+            .expect("1");
+        svc.call(req(RateScope::Local(Key::Snapshot)))
+            .await
+            .expect("2");
+        assert!(matches!(
+            svc.call(req(RateScope::Local(Key::Snapshot)))
+                .await
+                .unwrap_err(),
+            HttpError::Throttled
+        ));
+
+        timer.advance(Duration::from_secs(1)); // +2 tokens, but burst caps at 2
+        svc.call(req(RateScope::Local(Key::Snapshot)))
+            .await
+            .expect("refilled 1");
+        svc.call(req(RateScope::Local(Key::Snapshot)))
+            .await
+            .expect("refilled 2");
+        assert!(
+            matches!(
+                svc.call(req(RateScope::Local(Key::Snapshot)))
+                    .await
+                    .unwrap_err(),
+                HttpError::Throttled
+            ),
+            "exactly 2 tokens refilled in 1s (rate=2, burst-capped) — a 3rd must throttle"
+        );
+    }
+
+    #[tokio::test]
+    async fn partial_period_does_not_over_refill() {
+        // 2 tokens/sec: after only 250ms (< the 500ms/token interval) NO token has
+        // accrued, so a drained bucket still throttles. Catches an off-by-one-fast
+        // refill that credits a fractional token as whole.
+        let timer = MockTimer::new();
+        let svc = layer(timer.clone(), Duration::from_secs(0)).layer(Leaf::ok(b"ok"));
+        svc.call(req(RateScope::Local(Key::Snapshot)))
+            .await
+            .expect("1");
+        svc.call(req(RateScope::Local(Key::Snapshot)))
+            .await
+            .expect("2");
+        timer.advance(Duration::from_millis(250)); // < 500ms → no whole token yet
+        assert!(
+            matches!(
+                svc.call(req(RateScope::Local(Key::Snapshot)))
+                    .await
+                    .unwrap_err(),
+                HttpError::Throttled
+            ),
+            "a quarter-period must not refill a whole token"
+        );
+    }
 }
