@@ -301,12 +301,20 @@ git commit -m "test(net): pin no burst over-admission under concurrent acquires"
     // would inherit the 1s deadline and this would Timeout instead.
     #[tokio::test]
     async fn permit_wait_is_not_bounded_by_the_send_timeout() {
+        // RateLimit sits OUTSIDE Timeout: a permit park is bounded by rate_limit_max_wait,
+        // never cut by the (much shorter) send timeout. Send timeout = 100ms, max_wait =
+        // 60s. Drain Snapshot's 2 tokens, then a 3rd request parks on the empty bucket;
+        // advance 500ms — well PAST the 100ms send timeout, within max_wait — to refill a
+        // token. The parked request must SUCCEED: its wait was NOT cut by the send
+        // timeout. If RateLimit were INSIDE Timeout, the 100ms deadline would fire during
+        // the 500ms park and this would be Err(Timeout) instead. (The 500ms park > 100ms
+        // timeout is what makes the two arrangements distinguishable — a park shorter than
+        // the timeout would pass under both.)
         let timer = MockTimer::new();
         let leaf = ScriptLeaf::new(timer.clone(), vec![Step::Status(200)]);
-        // timeout = 1s (short send bound); max_wait = 60s (long permit park); retry off.
         let svc = stack(
             leaf,
-            http_cfg(1, Duration::from_secs(1), Duration::from_secs(60)),
+            http_cfg(1, Duration::from_millis(100), Duration::from_secs(60)),
             timer.clone(),
             NoAuth,
             rate_cfg(),
@@ -317,22 +325,31 @@ git commit -m "test(net): pin no burst over-admission under concurrent acquires"
         svc.call(req(RateScope::Local(Key::Snapshot))).await.expect("1");
         svc.call(req(RateScope::Local(Key::Snapshot))).await.expect("2");
 
-        // Third parks on the empty bucket. Spawn it, advance PAST the 1s send timeout to
-        // 500ms (one refill @ 2/s) — well within max_wait — and it must succeed.
+        // Third parks on the empty bucket. Advance in TWO steps so a swapped-in Timeout
+        // is actually observed: first past the 100ms send timeout (150ms) WHILE the park
+        // is still blocked (refill only at 500ms), yielding so the task is polled at that
+        // tick — under the real (outside) arrangement no timeout applies to the park, so
+        // it stays pending; under a swapped (inside) arrangement the 100ms deadline would
+        // fire here and resolve the task to Timeout. Then advance the rest to refill and
+        // let it succeed. (A single advance(500ms) would NOT catch the swap: both the
+        // deadline and the refill become ready at once and select polls the call arm
+        // first, letting the park win before the elapsed timeout is seen.)
         let svc2 = svc.clone();
         let waiter =
             tokio::spawn(async move { svc2.call(req(RateScope::Local(Key::Snapshot))).await });
-        tokio::task::yield_now().await;
-        timer.advance(Duration::from_millis(500)); // > if it were bounded by 1s? no — but proves park refills
+        tokio::task::yield_now().await; // task parks on the empty Snapshot bucket
+        timer.advance(Duration::from_millis(150)); // past the 100ms send timeout, before the 500ms refill
+        tokio::task::yield_now().await; // poll the task at t=150ms — a swapped-in Timeout would fire NOW
+        timer.advance(Duration::from_millis(350)); // total 500ms → refills 1 token
         let resp = waiter
             .await
             .unwrap()
-            .expect("parked permit refilled within max_wait — NOT cut by the send timeout");
+            .expect("parked permit refilled within max_wait — NOT cut by the 100ms send timeout");
         assert_eq!(resp.status(), http::StatusCode::OK);
     }
 ```
 
-> **Implementer note:** the decisive contrast is that the parked request resolves to `Ok(200)`, never `Err(Timeout)`. If you want to make the "past the send timeout" aspect starker, bump the drain so a full token needs >1s and advance e.g. `Duration::from_millis(1500)` before the refill — but keep the single refill within `max_wait`. The assertion that matters: **`Ok`, not `Timeout`.**
+> **Implementer note:** the decisive contrast is that the parked request (which waited 500ms — longer than the 100ms send timeout) resolves to `Ok(200)`, never `Err(Timeout)`. The park MUST exceed the send timeout, or the test can't distinguish RateLimit-outside-Timeout from inside. If the send timeout's own deadline seems to interfere once the permit is finally acquired, remember the send is instant (`Step::Status(200)`), so its fresh 100ms deadline never fires.
 
 - [ ] **Step 2: Run**
 
