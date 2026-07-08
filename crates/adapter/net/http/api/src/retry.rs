@@ -852,4 +852,16 @@ mod rng_tests {
         let differs = (0..64).any(|_| a.duration_in(ceil) != b.duration_in(ceil));
         assert!(differs, "a clone must diverge from its parent's sequence");
     }
+
+    #[test]
+    fn splitmix64_matches_the_reference_golden_vector() {
+        // Absolute reference vector from https://prng.di.unimi.it/splitmix64.c for
+        // seed = 0: next() finalizes (state += GOLDEN) each call. Guards against silent
+        // algorithm drift — a changed STEP or finalizer constant breaks deterministic
+        // backoff replay, which a same-seed determinism test can NOT catch.
+        let rng = SplitMix64::new(0);
+        assert_eq!(rng.next_u64(), 0xE220_A839_7B1D_CDAF);
+        assert_eq!(rng.next_u64(), 0x6E78_9E6A_A1B9_65F4);
+        assert_eq!(rng.next_u64(), 0x06C4_5D18_8009_454F);
+    }
 }
