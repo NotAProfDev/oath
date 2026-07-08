@@ -316,9 +316,22 @@ where
                     tracing::Span::current().record("attempts", u64::from(attempt));
                     return outcome; // success or a non-retryable verdict
                 }
+                // Honor a delay-seconds `Retry-After` on the retryable 5xx as a backoff
+                // FLOOR (ADR-0031 Amendment #2): read it before the response is dropped.
+                let honored = outcome
+                    .as_ref()
+                    .ok()
+                    .and_then(|resp| crate::retry_after::parse_retry_after(resp.headers()));
                 drop(outcome); // release the prior response's Guarded permit before waiting
-                let ceil = backoff_ceiling(self.cfg.base, self.cfg.cap, attempt);
-                let delay = self.rng.duration_in(ceil);
+                let jittered =
+                    self.rng
+                        .duration_in(backoff_ceiling(self.cfg.base, self.cfg.cap, attempt));
+                // Server value overrides local backoff (never re-jittered), floored by
+                // our own jittered schedule, and capped by `RetryConfig::cap`.
+                let delay = honored.map_or(jittered, |ra| ra.min(self.cfg.cap).max(jittered));
+                if honored.is_some() {
+                    crate::meter::retry_after_honored("retry");
+                }
                 // One retry is now committed (a send beyond the first): count it and
                 // record its backoff — the retry-amplification signals (deep review §2C).
                 crate::meter::retry_attempt(route.clone());
@@ -391,6 +404,7 @@ mod tests {
     enum Step {
         Err(ErrorKind),
         Status(u16),
+        StatusRetryAfter(u16, u64),
     }
 
     fn err_of(kind: ErrorKind) -> HttpError {
@@ -443,6 +457,13 @@ mod tests {
                     Step::Status(code) => {
                         let mut resp = http::Response::new(StubBody::new(b"body"));
                         *resp.status_mut() = http::StatusCode::from_u16(code).unwrap();
+                        Ok(resp)
+                    },
+                    Step::StatusRetryAfter(code, secs) => {
+                        let mut resp = http::Response::new(StubBody::new(b"body"));
+                        *resp.status_mut() = http::StatusCode::from_u16(code).unwrap();
+                        resp.headers_mut()
+                            .insert(http::header::RETRY_AFTER, http::HeaderValue::from(secs));
                         Ok(resp)
                     },
                 }
@@ -582,6 +603,56 @@ mod tests {
         let resp = waiter.await.unwrap().expect("503 retried → 200");
         assert_eq!(resp.status(), http::StatusCode::OK);
         assert_eq!(leaf.calls(), 2);
+    }
+
+    #[tokio::test]
+    async fn retry_after_on_a_5xx_sets_the_backoff_floor() {
+        // base = 0 → jittered ceiling 0 → jittered = 0. A 503 carrying Retry-After: 5
+        // must make the retry sleep 5s (the server floor), not 0. cap = 10s ≥ 5s, so
+        // the honored value is not clamped. If honoring regressed, the delay would be 0
+        // and the retry would fire immediately with no 5s park.
+        let timer = MockTimer::new();
+        let leaf = ScriptLeaf::new(vec![Step::StatusRetryAfter(503, 5), Step::Status(200)]);
+        let svc = RetryLayer::new(
+            cfg(3, Duration::ZERO, Duration::from_secs(10)),
+            timer.clone(),
+        )
+        .layer(leaf.clone());
+        let handle = tokio::spawn(async move { svc.call(req(true)).await });
+        tokio::task::yield_now().await; // attempt 1 → 503, parks on the 5s Retry-After sleep
+        assert!(
+            !handle.is_finished(),
+            "an honored Retry-After must park the retry; a 0 backoff would have finished it"
+        );
+        timer.advance(Duration::from_secs(5)); // wake the parked retry
+        let resp = handle
+            .await
+            .unwrap()
+            .expect("2nd attempt after the honored wait → 200");
+        assert_eq!(resp.status(), http::StatusCode::OK);
+        assert_eq!(leaf.calls(), 2);
+    }
+
+    #[tokio::test]
+    async fn retry_after_on_a_5xx_is_clamped_to_the_retry_cap() {
+        // Retry-After: 100 but cap = 2s → the honored wait clamps to 2s, not 100s.
+        let timer = MockTimer::new();
+        let leaf = ScriptLeaf::new(vec![Step::StatusRetryAfter(503, 100), Step::Status(200)]);
+        let svc = RetryLayer::new(
+            cfg(3, Duration::ZERO, Duration::from_secs(2)),
+            timer.clone(),
+        )
+        .layer(leaf.clone());
+        let handle = tokio::spawn(async move { svc.call(req(true)).await });
+        tokio::task::yield_now().await; // parks on the clamped 2s sleep
+        timer.advance(Duration::from_secs(2)); // the 2s clamp elapses; a 100s sleep would not
+        tokio::task::yield_now().await; // let the woken retry run attempt 2
+        assert!(
+            handle.is_finished(),
+            "the honored value must be clamped to cap (2s), not held for 100s"
+        );
+        let resp = handle.await.unwrap().expect("clamped wait elapsed → 200");
+        assert_eq!(resp.status(), http::StatusCode::OK);
     }
 
     #[tokio::test]

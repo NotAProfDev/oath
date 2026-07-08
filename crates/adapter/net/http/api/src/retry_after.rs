@@ -21,19 +21,6 @@ use std::time::Duration;
 // item not reachable outside the crate). `pub(crate)` states the true visibility;
 // silence the losing alternative, matching `clock.rs`.
 #[allow(clippy::redundant_pub_crate)]
-// Not called yet outside `#[cfg(test)]`: `Retry` (Task 4) and `CircuitBreaker`
-// (Task 5) are its first non-test callers and land in later commits on this
-// branch. Gated to non-test builds because the test module below already calls
-// it, so `dead_code` never fires under `cfg(test)` — `expect` there would itself
-// be the unfulfilled one. `expect` (not `allow`) so `-D warnings` fails loudly —
-// and tells us to delete this attribute — the moment a non-test caller lands.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "consumed by Task 4 (Retry) / Task 5 (CircuitBreaker), not yet landed"
-    )
-)]
 pub(crate) fn parse_retry_after(headers: &http::HeaderMap) -> Option<Duration> {
     let secs: u64 = headers
         .get(http::header::RETRY_AFTER)?

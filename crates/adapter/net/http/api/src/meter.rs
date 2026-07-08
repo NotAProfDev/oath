@@ -83,10 +83,6 @@ pub(crate) fn backoff(route: Cow<'static, str>, delay: Duration) {
 }
 
 /// Count one honored `Retry-After` directive at `site` (`"retry"` or `"breaker"`).
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "consumed by Retry/CircuitBreaker in Tasks 4-5")
-)]
 pub(crate) fn retry_after_honored(site: &'static str) {
     metrics::counter!(RETRY_AFTER_HONORED, "site" => site).increment(1);
 }
