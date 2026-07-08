@@ -853,4 +853,30 @@ mod tests {
             "Both must acquire the (empty) global bucket before its local side"
         );
     }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn concurrent_burst_admits_at_most_the_burst_size() {
+        // Snapshot burst = 2. Fire 8 requests concurrently against a fresh bucket with
+        // max_wait = 0. The bucket must admit EXACTLY 2 and throttle the other 6 — no
+        // momentary over-admission from a racing consume/refill.
+        let timer = MockTimer::new();
+        let svc = layer(timer, Duration::from_secs(0)).layer(Leaf::ok(b"ok"));
+        let mut handles = Vec::new();
+        for _ in 0..8 {
+            let s = svc.clone();
+            handles.push(tokio::spawn(async move {
+                s.call(req(RateScope::Local(Key::Snapshot))).await.is_ok()
+            }));
+        }
+        let mut admitted = 0usize;
+        for h in handles {
+            if h.await.unwrap() {
+                admitted += 1;
+            }
+        }
+        assert_eq!(
+            admitted, 2,
+            "a burst-2 bucket admits exactly its burst under a concurrent burst, no over-admission"
+        );
+    }
 }
