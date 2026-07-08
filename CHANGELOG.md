@@ -55,7 +55,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   gaps (issue #101). Added regression tests for the rate-limiter wait+refill park loop
   (`max_wait > 0`), exact refill rate, `RateScope::Both` acquire order, RateLimit-
   outside-Timeout permit-wait, no burst over-admission, the Half-Open + 429 re-trip on
-  `throttle_cooldown`, the Retry backoff doubling ladder, and a SplitMix64 golden
+  `retry_after_fallback`, the Retry backoff doubling ladder, and a SplitMix64 golden
   vector; integration tests exercising the assembled `stack()` over the **real** hyper
   leaf (reset→retry, 429→breaker-trip, send-timeout) plus a positive HTTP/2-keepalive
   survival test. Added doctests for `stack`/`build`/`HttpClient`/`RateScope`/the layer
@@ -75,7 +75,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   connections can be dropped without `RST`ing an in-flight order submission; it
   does not reject new calls (stop sending first). `stack()`/`build()` now validate
   `HttpConfig` `Duration`s at construction — `timeout`, `circuit_breaker.cooldown`,
-  and `circuit_breaker.throttle_cooldown` must be non-zero (a zero would silently
+  and `circuit_breaker.retry_after_fallback` must be non-zero (a zero would silently
   defeat the layer it configures) — returning a new `BuildError::ZeroDuration`,
   symmetric with the existing pacing-parameter validation. `rate_limit_max_wait` and
   the retry backoff may still be zero.
@@ -137,7 +137,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `CircuitBreaker<S, T>` service + `CircuitBreakerLayer<T>` factory (`net-api::Layer`):
   the reactive backstop to `RateLimit`. Trips Open after `failure_threshold` consecutive
   `Connection`/`Timeout`/`5xx` failures, or immediately on a `Throttled`/429 with the long
-  `throttle_cooldown`; fast-rejects with a new non-retryable `HttpError::CircuitOpen`
+  `retry_after_fallback`; fast-rejects with a new non-retryable `HttpError::CircuitOpen`
   (mapped to a new `ErrorKind::CircuitOpen`) without touching the inner stack; admits
   bounded Half-Open probes after cooldown (reached-host closes, failure re-opens). Pure
   clock-injected `Breaker` state machine (Closed/Open/Half-Open) behind a thin
