@@ -9,6 +9,20 @@ use std::future::Future;
 
 /// A composed HTTP client: a [`Service`] from `http::Request<Bytes>` to
 /// `http::Response<Self::Body>` with `Error = HttpError`.
+///
+/// # Example
+/// The `HttpClient` seam is what adapters depend on — construct one with
+/// [`stack()`](crate::stack()) or the hyper `build()` and send through this trait's
+/// [`send`](HttpClient::send):
+/// ```no_run
+/// use oath_adapter_net_http_api::HttpClient;
+/// use bytes::Bytes;
+///
+/// pub async fn fetch(client: &impl HttpClient, req: http::Request<Bytes>) {
+///     let _ = client.send(req).await;
+/// }
+/// # fn main() {}
+/// ```
 pub trait HttpClient:
     Service<http::Request<Bytes>, Response = http::Response<Self::Body>, Error = HttpError>
 {

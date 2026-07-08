@@ -19,6 +19,20 @@
 /// only" is said with an explicit [`RateScope::Global`]; opt out with
 /// [`RateScope::None`]. `Clone` so it survives the per-attempt request clone
 /// `Retry` performs (Slice 1).
+///
+/// # Example
+/// Stamp the mandatory per-request pacing directive before calling the client
+/// (an absent `RateScope` fails closed with [`HttpError::Throttled`]):
+/// ```
+/// use oath_adapter_net_http_api::RateScope;
+///
+/// #[derive(Clone, Copy)]
+/// enum Endpoint { Orders }
+///
+/// let mut req = http::Request::new(bytes::Bytes::new());
+/// req.extensions_mut().insert(RateScope::Local(Endpoint::Orders));
+/// assert!(req.extensions().get::<RateScope<Endpoint>>().is_some());
+/// ```
 #[derive(Debug, Clone)]
 pub enum RateScope<K> {
     /// Acquire nothing — the **explicit** unlimited opt-out.
@@ -59,6 +73,12 @@ enum Bucket {
     Rate {
         refill_per_sec: f64,
         burst: f64,
+        // Concurrency-test note (loom): held only for the brief refill/consume
+        // critical section in `acquire_rate` below, and NEVER across an `.await`
+        // (the lock is dropped before `timer.sleep`). A loom interleaving model
+        // would add little over the clock-injected unit tests. Deferred
+        // deliberately (Tier-1 PR8/#101); revisit if the lock scope ever grows to
+        // span an await or the contention model changes.
         state: Mutex<TokenState>,
     },
     /// A concurrency semaphore with `max` permits.
@@ -129,6 +149,25 @@ impl<K, T> RateLimitLayer<K, T> {
     /// # Errors
     /// Propagates [`validate_coverage`]'s and [`validate_concurrency_singleton`]'s
     /// [`BuildError`].
+    ///
+    /// # Example
+    /// ```
+    /// use oath_adapter_net_http_api::{RateLimitConfig, RateLimitLayer, LimitDecl, LimitPolicy, RateKey};
+    /// use oath_adapter_net_mock::MockTimer;
+    /// use std::collections::HashMap;
+    /// use std::time::Duration;
+    ///
+    /// #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+    /// enum Endpoint { Orders }
+    /// impl RateKey for Endpoint { fn all() -> &'static [Self] { &[Endpoint::Orders] } }
+    ///
+    /// let cfg = RateLimitConfig {
+    ///     global: LimitPolicy::TokenBucket { rate: 10, per: Duration::from_secs(1), burst: 10 },
+    ///     local: HashMap::from([(Endpoint::Orders, LimitDecl::GlobalOnly)]),
+    /// };
+    /// let layer = RateLimitLayer::new(&cfg, MockTimer::new(), Duration::from_secs(0));
+    /// assert!(layer.is_ok());
+    /// ```
     pub fn new(cfg: &RateLimitConfig<K>, timer: T, max_wait: Duration) -> Result<Self, BuildError>
     where
         K: RateKey + fmt::Debug,
@@ -714,5 +753,173 @@ mod tests {
         svc.call(req(RateScope::Local(Key::Snapshot)))
             .await
             .expect("refilled after 5s");
+    }
+
+    #[tokio::test]
+    async fn rate_park_loop_sleeps_then_refills_and_succeeds() {
+        // Snapshot = 2/s burst 2. Drain both tokens, then a third request with a
+        // GENEROUS max_wait must PARK in acquire_rate (timer.sleep), not throttle.
+        // Advancing the clock past the refill window wakes it and it succeeds — the
+        // proactive wait+refill path that every max_wait=0 test skips.
+        let timer = MockTimer::new();
+        let svc = layer(timer.clone(), Duration::from_secs(5)).layer(Leaf::ok(b"ok"));
+        svc.call(req(RateScope::Local(Key::Snapshot)))
+            .await
+            .expect("1st drains a token");
+        svc.call(req(RateScope::Local(Key::Snapshot)))
+            .await
+            .expect("2nd drains the last token");
+
+        // Third: bucket empty, but max_wait = 5s > the 500ms refill interval → it must
+        // park on timer.sleep rather than return Throttled. Spawn it, let it register
+        // the sleep, then advance the clock to refill one token and wake it.
+        let svc2 = svc.clone();
+        let waiter =
+            tokio::spawn(async move { svc2.call(req(RateScope::Local(Key::Snapshot))).await });
+        tokio::task::yield_now().await; // task locks the bucket, sees empty, arms timer.sleep
+        timer.advance(Duration::from_millis(500)); // 2 tokens/sec → +1 token, wakes the sleeper
+        waiter
+            .await
+            .unwrap()
+            .expect("parked request refilled within max_wait and succeeded");
+    }
+
+    #[tokio::test]
+    async fn refill_rate_is_exact_not_just_a_lower_bound() {
+        // Snapshot = 2 tokens/sec, burst 2. Drain both, then advance ONLY 500ms so the
+        // correct refill is exactly 1 token (0.5s × 2/s = 1) — strictly BELOW burst, so
+        // the burst cap can't mask an inflated rate. Admit exactly 1; the next throttles.
+        // A 2x-over-refill bug credits 2 tokens in 500ms → admits a 2nd → this fails,
+        // WITHOUT needing the burst cap to also be broken.
+        let timer = MockTimer::new();
+        let svc = layer(timer.clone(), Duration::from_secs(0)).layer(Leaf::ok(b"ok"));
+        svc.call(req(RateScope::Local(Key::Snapshot)))
+            .await
+            .expect("1");
+        svc.call(req(RateScope::Local(Key::Snapshot)))
+            .await
+            .expect("2");
+        assert!(matches!(
+            svc.call(req(RateScope::Local(Key::Snapshot)))
+                .await
+                .unwrap_err(),
+            HttpError::Throttled
+        ));
+        timer.advance(Duration::from_millis(500)); // exactly 1 token, < burst 2
+        svc.call(req(RateScope::Local(Key::Snapshot)))
+            .await
+            .expect("exactly 1 token refilled");
+        assert!(
+            matches!(
+                svc.call(req(RateScope::Local(Key::Snapshot)))
+                    .await
+                    .unwrap_err(),
+                HttpError::Throttled
+            ),
+            "only 1 token accrued in 500ms (rate=2/s) — a 2nd admit would mean an over-refill"
+        );
+    }
+
+    #[tokio::test]
+    async fn partial_period_does_not_over_refill() {
+        // 2 tokens/sec: after only 250ms (< the 500ms/token interval) NO token has
+        // accrued, so a drained bucket still throttles. Catches an off-by-one-fast
+        // refill that credits a fractional token as whole.
+        let timer = MockTimer::new();
+        let svc = layer(timer.clone(), Duration::from_secs(0)).layer(Leaf::ok(b"ok"));
+        svc.call(req(RateScope::Local(Key::Snapshot)))
+            .await
+            .expect("1");
+        svc.call(req(RateScope::Local(Key::Snapshot)))
+            .await
+            .expect("2");
+        timer.advance(Duration::from_millis(250)); // < 500ms → no whole token yet
+        assert!(
+            matches!(
+                svc.call(req(RateScope::Local(Key::Snapshot)))
+                    .await
+                    .unwrap_err(),
+                HttpError::Throttled
+            ),
+            "a quarter-period must not refill a whole token"
+        );
+    }
+
+    #[tokio::test]
+    async fn both_scope_spends_global_and_local_in_one_acquire() {
+        // Both(Snapshot) must acquire the Snapshot LOCAL bucket (burst = 2), the
+        // tighter of the two (global burst = 10): the 3rd Both request throttles on
+        // the drained local bucket, proving the local side is consulted (a Both that
+        // only spent global would admit up to 10). The companion test
+        // `both_scope_throttles_when_only_the_global_bucket_is_empty` pins the global
+        // side; together the pair proves a Both acquire spends both buckets.
+        let timer = MockTimer::new();
+        let svc = layer(timer.clone(), Duration::from_secs(0)).layer(Leaf::ok(b"ok"));
+        svc.call(req(RateScope::Both(Key::Snapshot)))
+            .await
+            .expect("1 (global+local)");
+        svc.call(req(RateScope::Both(Key::Snapshot)))
+            .await
+            .expect("2 (global+local)");
+        assert!(
+            matches!(
+                svc.call(req(RateScope::Both(Key::Snapshot)))
+                    .await
+                    .unwrap_err(),
+                HttpError::Throttled
+            ),
+            "3rd Both throttles on the drained LOCAL bucket → the local bucket is consulted"
+        );
+    }
+
+    #[tokio::test]
+    async fn both_scope_throttles_when_only_the_global_bucket_is_empty() {
+        // Symmetric: drain the GLOBAL bucket (10/s) via Global-scoped calls, then a
+        // Both(History) request — whose local side (concurrency) is free — must still
+        // throttle, proving the global side is consulted for a Both request. The
+        // companion test `both_scope_spends_global_and_local_in_one_acquire` pins the
+        // local side; together the pair proves a Both acquire spends both buckets.
+        let timer = MockTimer::new();
+        let svc = layer(timer.clone(), Duration::from_secs(0)).layer(Leaf::ok(b"ok"));
+        for _ in 0..10 {
+            svc.call(req(RateScope::Global))
+                .await
+                .expect("drain global burst 10");
+        }
+        assert!(
+            matches!(
+                svc.call(req(RateScope::Both(Key::History)))
+                    .await
+                    .unwrap_err(),
+                HttpError::Throttled
+            ),
+            "Both must acquire the (empty) global bucket before its local side"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn concurrent_burst_admits_at_most_the_burst_size() {
+        // Snapshot burst = 2. Fire 8 requests concurrently against a fresh bucket with
+        // max_wait = 0. The bucket must admit EXACTLY 2 and throttle the other 6 — no
+        // momentary over-admission from a racing consume/refill.
+        let timer = MockTimer::new();
+        let svc = layer(timer, Duration::from_secs(0)).layer(Leaf::ok(b"ok"));
+        let mut handles = Vec::new();
+        for _ in 0..8 {
+            let s = svc.clone();
+            handles.push(tokio::spawn(async move {
+                s.call(req(RateScope::Local(Key::Snapshot))).await.is_ok()
+            }));
+        }
+        let mut admitted = 0usize;
+        for h in handles {
+            if h.await.unwrap() {
+                admitted += 1;
+            }
+        }
+        assert_eq!(
+            admitted, 2,
+            "a burst-2 bucket admits exactly its burst under a concurrent burst, no over-admission"
+        );
     }
 }

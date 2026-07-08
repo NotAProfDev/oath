@@ -318,6 +318,22 @@ impl<T> CircuitBreakerLayer<T> {
     /// **Infallible** — `NonZeroU32` makes the two counts "≥ 1" a type invariant
     /// (contrast `RateLimitLayer::new`, which validates a config map). Not `const`:
     /// it allocates the shared `Arc<Mutex<Breaker>>`.
+    ///
+    /// # Example
+    /// ```
+    /// use oath_adapter_net_http_api::{CircuitBreakerLayer, CircuitBreakerConfig};
+    /// use oath_adapter_net_mock::MockTimer;
+    /// use std::num::NonZeroU32;
+    /// use std::time::Duration;
+    ///
+    /// let cfg = CircuitBreakerConfig {
+    ///     failure_threshold: NonZeroU32::new(3).unwrap(),
+    ///     cooldown: Duration::from_secs(30),
+    ///     throttle_cooldown: Duration::from_secs(900),
+    ///     half_open_probes: NonZeroU32::new(1).unwrap(),
+    /// };
+    /// let _layer = CircuitBreakerLayer::new(cfg, MockTimer::new());
+    /// ```
     #[must_use]
     pub fn new(cfg: CircuitBreakerConfig, timer: T) -> Self {
         Self {
@@ -363,6 +379,12 @@ impl<S, T: Clone> Layer<S> for CircuitBreakerLayer<T> {
 /// held across the `await`. Body-transparent — `http::Response<B>` is forwarded.
 pub struct CircuitBreaker<S, T> {
     inner: S,
+    // Concurrency-test note (loom): held only for the brief admit()/record()
+    // critical sections in `Service::call` below, and NEVER across an `.await`
+    // (see the struct doc above). A loom interleaving model would add little over
+    // the clock-injected `Breaker` unit tests. Deferred deliberately (Tier-1
+    // PR8/#101); revisit if the lock scope ever grows to span an await or the
+    // contention model changes.
     breaker: Arc<Mutex<Breaker>>,
     timer: T,
 }
@@ -690,6 +712,30 @@ mod breaker_tests {
     }
 
     #[test]
+    fn half_open_probe_429_reopens_on_the_long_cooldown() {
+        // Trip on a normal failure (short 30s cooldown). At Half-Open, the probe returns
+        // a 429 (Class::TripNow) — the breaker must re-open on throttle_cooldown (900s),
+        // NOT the 30s cooldown a failing probe would use. Distinguish the two: at
+        // reopen+30s still Reject; only at reopen+900s does the next probe admit.
+        let now = Instant::now();
+        let mut b = Breaker::new(cfg(1, 1)); // trips on the first failure
+        b.record(Class::Failure, now); // Closed → Open (30s cooldown)
+        let probe_at = now + Duration::from_secs(30);
+        assert_eq!(b.admit(probe_at), Admit::Probe, "cooldown elapsed → probe");
+        b.record(Class::TripNow, probe_at); // 429 during the probe → long box
+        assert_eq!(
+            b.admit(probe_at + Duration::from_secs(30)),
+            Admit::Reject,
+            "short cooldown is NOT enough after a 429 re-trip"
+        );
+        assert_eq!(
+            b.admit(probe_at + Duration::from_secs(900)),
+            Admit::Probe,
+            "only throttle_cooldown reopens after a Half-Open 429 re-trip"
+        );
+    }
+
+    #[test]
     fn multi_probe_half_open_requires_all_to_close() {
         let now = Instant::now();
         let mut b = Breaker::new(cfg(1, 2)); // 2 probes per episode
@@ -972,6 +1018,46 @@ mod service_tests {
             2,
             "one 429 + one probe; the fast-rejects never hit the leaf"
         );
+    }
+
+    #[tokio::test]
+    async fn a_429_during_a_half_open_probe_reopens_on_the_long_cooldown() {
+        let timer = MockTimer::new();
+        // fail, fail → Open (30s); probe returns 429 → reopen on throttle_cooldown (900s);
+        // final probe returns 200.
+        let leaf = ScriptLeaf::new(vec![
+            Step::Err(ErrorKind::Connection),
+            Step::Err(ErrorKind::Connection),
+            Step::Status(429),
+            Step::Status(200),
+        ]);
+        let svc = CircuitBreakerLayer::new(cfg(2, secs(30), secs(900), 1), timer.clone())
+            .layer(leaf.clone());
+        let _ = svc.call(bare_req()).await; // fail 1
+        let _ = svc.call(bare_req()).await; // fail 2 → Open
+        assert!(matches!(
+            svc.call(bare_req()).await.unwrap_err(),
+            HttpError::CircuitOpen
+        ));
+        timer.advance(secs(30)); // normal cooldown → probe admitted
+        let resp = svc.call(bare_req()).await.expect("probe reaches the leaf");
+        assert_eq!(resp.status(), http::StatusCode::TOO_MANY_REQUESTS); // 429 as Ok
+        // Re-opened on the LONG cooldown: 30s more is not enough…
+        timer.advance(secs(30));
+        assert!(
+            matches!(
+                svc.call(bare_req()).await.unwrap_err(),
+                HttpError::CircuitOpen
+            ),
+            "a 429 probe re-opened on throttle_cooldown, not the 30s cooldown"
+        );
+        // …but a further advance to a full 900s from the re-trip admits the next probe.
+        timer.advance(secs(870)); // 30 + 870 = 900 total since the 429 re-trip
+        let ok = svc
+            .call(bare_req())
+            .await
+            .expect("throttle_cooldown elapsed → probe → 200");
+        assert_eq!(ok.status(), http::StatusCode::OK);
     }
 
     #[tokio::test]

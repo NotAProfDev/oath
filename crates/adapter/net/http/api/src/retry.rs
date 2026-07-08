@@ -142,6 +142,22 @@ impl<T> RetryLayer<T> {
     /// **Infallible** — `RetryConfig::max_attempts` is `NonZeroU32` (≥ 1 send is a
     /// type invariant) and `cap < base` is harmless (the ceiling just never grows
     /// past `cap`), so there is nothing to validate (contrast `RateLimitLayer::new`).
+    ///
+    /// # Example
+    /// ```
+    /// use oath_adapter_net_http_api::{RetryLayer, RetryConfig};
+    /// use oath_adapter_net_mock::MockTimer;
+    /// use std::num::NonZeroU32;
+    /// use std::time::Duration;
+    ///
+    /// let cfg = RetryConfig {
+    ///     max_attempts: NonZeroU32::new(3).unwrap(),
+    ///     base: Duration::from_millis(50),
+    ///     cap: Duration::from_secs(1),
+    ///     seed: 1,
+    /// };
+    /// let _layer = RetryLayer::new(cfg, MockTimer::new());
+    /// ```
     #[must_use]
     pub const fn new(cfg: RetryConfig, timer: T) -> Self {
         Self { cfg, timer }
@@ -752,6 +768,32 @@ mod tests {
             Duration::from_secs(30)
         );
     }
+
+    #[test]
+    fn backoff_ceiling_doubles_each_attempt_until_the_cap() {
+        // base = 10ms, cap = 10s (high enough that clamping never fires for attempts
+        // 1..=4): the ceiling must be base·2^(attempt-1) — 10, 20, 40, 80 ms. Every
+        // loop-driving retry test uses base == cap, so the doubling law is otherwise
+        // unpinned; a 2^attempt (overshoot) or "no doubling" bug lands here.
+        let base = Duration::from_millis(10);
+        let cap = Duration::from_secs(10);
+        assert_eq!(
+            super::backoff_ceiling(base, cap, 1),
+            Duration::from_millis(10)
+        );
+        assert_eq!(
+            super::backoff_ceiling(base, cap, 2),
+            Duration::from_millis(20)
+        );
+        assert_eq!(
+            super::backoff_ceiling(base, cap, 3),
+            Duration::from_millis(40)
+        );
+        assert_eq!(
+            super::backoff_ceiling(base, cap, 4),
+            Duration::from_millis(80)
+        );
+    }
 }
 
 #[cfg(test)]
@@ -825,5 +867,17 @@ mod rng_tests {
         let ceil = Duration::from_millis(50);
         let differs = (0..64).any(|_| a.duration_in(ceil) != b.duration_in(ceil));
         assert!(differs, "a clone must diverge from its parent's sequence");
+    }
+
+    #[test]
+    fn splitmix64_matches_the_reference_golden_vector() {
+        // Absolute reference vector from https://prng.di.unimi.it/splitmix64.c for
+        // seed = 0: next() finalizes (state += GOLDEN) each call. Guards against silent
+        // algorithm drift — a changed STEP or finalizer constant breaks deterministic
+        // backoff replay, which a same-seed determinism test can NOT catch.
+        let rng = SplitMix64::new(0);
+        assert_eq!(rng.next_u64(), 0xE220_A839_7B1D_CDAF);
+        assert_eq!(rng.next_u64(), 0x6E78_9E6A_A1B9_65F4);
+        assert_eq!(rng.next_u64(), 0x06C4_5D18_8009_454F);
     }
 }

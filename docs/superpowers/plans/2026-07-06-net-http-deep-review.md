@@ -311,6 +311,16 @@ vs the work around it), the two brief breaker mutex acquisitions per request (fi
 - **No `SplitMix64` golden-vector test** (algorithm drift breaks deterministic replay
   silently); **no loom/concurrency tests** for the shared `Mutex<TokenState>` / `Arc<Mutex<Breaker>>`;
   **Retry backoff schedule not pinned**.
+- **loom deferred (PR8/#101, 2026-07-08):** no loom model for `Mutex<TokenState>` /
+  `Arc<Mutex<Breaker>>`. Both locks are held only across tiny non-`await` critical
+  sections; a loom test adds little now. Revisit if a lock scope grows to span an
+  `await`. Tracked as a Tier-2 candidate.
+- **h2-keepalive reaping (negative case) deferred (PR8/#101, 2026-07-08):** Task 10
+  (`hyper/src/leaf.rs`) shipped only the POSITIVE h2-keepalive survival test — an
+  idle pooled h2 connection with keepalive enabled stays usable. The NEGATIVE case
+  (an idle connection REAPED when keepalive is disabled) depends on hyper's/OS
+  idle-connection timing and is flake-prone as a unit test; deferred deliberately.
+  Tracked as a Tier-2 candidate.
 
 ---
 

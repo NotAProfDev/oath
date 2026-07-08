@@ -154,8 +154,9 @@ pub enum BuildError {
 /// Validate that `cfg` is a **total**, param-sane pacing configuration.
 ///
 /// The `global` policy is valid, and every [`RateKey`] variant is classified
-/// with a valid policy (ADR-0034 §3). Slice 2's `stack()`/`build()` call this
-/// before assembling the stack, so a coverage gap is a boot failure.
+/// with a valid policy (ADR-0034 §3). `RateLimitLayer::new` calls this (and
+/// `stack()` transitively) before assembling the stack, so a coverage gap is a
+/// boot failure.
 ///
 /// # Errors
 /// [`BuildError::UndeclaredKey`] if a `K::all()` variant is absent from
@@ -236,42 +237,6 @@ mod tests {
         }
         assert!(TestKey::all().iter().copied().all(is_listed));
         assert_eq!(TestKey::all().len(), 3);
-    }
-
-    #[test]
-    fn config_classifies_every_key_explicitly() {
-        let cfg = RateLimitConfig {
-            global: LimitPolicy::TokenBucket {
-                rate: 10,
-                per: Duration::from_secs(1),
-                burst: 20,
-            },
-            local: HashMap::from([
-                (
-                    TestKey::PlaceOrder,
-                    LimitDecl::Policy(LimitPolicy::Concurrency { max: 1 }),
-                ),
-                (
-                    TestKey::Snapshot,
-                    LimitDecl::Policy(LimitPolicy::TokenBucket {
-                        rate: 5,
-                        per: Duration::from_secs(1),
-                        burst: 5,
-                    }),
-                ),
-                (TestKey::History, LimitDecl::GlobalOnly),
-            ]),
-        };
-        assert_eq!(cfg.local.len(), 3);
-        assert_eq!(
-            cfg.global,
-            LimitPolicy::TokenBucket {
-                rate: 10,
-                per: Duration::from_secs(1),
-                burst: 20
-            }
-        );
-        assert_eq!(cfg.local[&TestKey::History], LimitDecl::GlobalOnly);
     }
 
     /// A total, param-sane config over `TestKey` — the baseline the negative
@@ -393,21 +358,23 @@ mod tests {
     }
 
     #[test]
-    fn token_bucket_carries_a_period_for_sub_1_per_second_rates() {
-        // IBKR orders = 1 per 5s — inexpressible as tokens/second under u32.
-        let p = LimitPolicy::TokenBucket {
-            rate: 1,
-            per: Duration::from_secs(5),
-            burst: 1,
-        };
-        assert!(matches!(
-            p,
-            LimitPolicy::TokenBucket {
+    fn a_sub_one_per_second_token_bucket_is_a_valid_policy() {
+        // A 1-token-per-5s bucket (sub-1/s) is param-sane and must pass validation —
+        // the period carries the sub-Hz rate. Exercises LimitPolicy::validate via
+        // validate_coverage, not a literal re-read.
+        let cfg = RateLimitConfig::<TestKey> {
+            global: LimitPolicy::TokenBucket {
                 rate: 1,
+                per: Duration::from_secs(5),
                 burst: 1,
-                ..
-            }
-        ));
+            },
+            local: HashMap::from([
+                (TestKey::PlaceOrder, LimitDecl::GlobalOnly),
+                (TestKey::Snapshot, LimitDecl::GlobalOnly),
+                (TestKey::History, LimitDecl::GlobalOnly),
+            ]),
+        };
+        assert_eq!(validate_coverage(&cfg), Ok(()));
     }
 
     #[test]

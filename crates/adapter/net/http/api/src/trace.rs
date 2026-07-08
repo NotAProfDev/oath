@@ -49,6 +49,14 @@ pub struct TracingLayer<T> {
 
 impl<T> TracingLayer<T> {
     /// Build the layer with a [`Timer`] clock. Infallible — no config to check.
+    ///
+    /// # Example
+    /// ```
+    /// use oath_adapter_net_http_api::TracingLayer;
+    /// use oath_adapter_net_mock::MockTimer;
+    ///
+    /// let _layer = TracingLayer::new(MockTimer::new());
+    /// ```
     #[must_use]
     pub const fn new(timer: T) -> Self {
         Self { timer }
