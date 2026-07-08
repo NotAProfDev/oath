@@ -63,6 +63,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   protocol, and fixed stale rustdoc (L7/L8) and tautological rate-config tests (L12).
   Test/docs only — no behaviour or public-API change. The loom concurrency model is
   deliberately deferred (documented).
+- **Breaking (pre-release) — net-http.** `CircuitBreakerConfig::throttle_cooldown` is
+  renamed `retry_after_fallback` (the `429` reopen wait when no usable `Retry-After` is
+  present), and a new `retry_after_cap` bounds an honored `Retry-After` (both validated
+  non-zero at `stack()`/`build()`).
 
 ### Added
 
@@ -224,6 +228,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   gateway (e.g. IBKR Client Portal); an `allow_http` flag defaulting to **HTTPS-only**
   (plaintext is now explicit opt-in); and HTTP/2 keepalive-PING knobs. `net-http-hyper`
   now depends on `rustls` directly (was dev-only).
+- **net-http:** the resilience stack now honors a `delay-seconds` `Retry-After`
+  response header at two disjoint sites — as the `5xx` retry backoff floor
+  (`min(cap, max(retry_after, jittered))`, un-jittered) and as the `429`
+  circuit-breaker reopen deadline (`min(retry_after, retry_after_cap)`, else the
+  `retry_after_fallback` default). `429` is still never retried. An `HTTP-date`,
+  float, overflowing, or absent value falls back to existing behavior. A new
+  site-labelled `http_retry_after_honored_total` metric. (ADR-0031 Amendment #2)
 
 ### Fixed
 

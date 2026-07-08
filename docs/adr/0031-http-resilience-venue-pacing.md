@@ -207,3 +207,25 @@ Recorded append-only (the decision text above is unedited).
    trips, and never resets the Closed-state streak). The proactive-limiter (`RateLimit`) /
    reactive-breaker (`CircuitBreaker`) split of §5 is otherwise unchanged. See the
    [deep-review](../superpowers/plans/2026-07-06-net-http-deep-review.md) finding C1.
+
+2. **`Retry-After` honoring (delay-seconds) at two disjoint sites; `throttle_cooldown`
+   renamed.** The stack now reads a `delay-seconds` `Retry-After` response header (RFC
+   9110 §10.2.3) at two **disjoint** sites — no response is paced twice:
+   - **`Retry` (5xx):** on a retryable `5xx` carrying `Retry-After`, the backoff is
+     `min(RetryConfig::cap, max(retry_after, jittered))` — the server value is a floor,
+     the existing jittered exponential the other floor, capped by `cap`, and the server
+     value is **not** re-jittered (the server already jittered).
+   - **`CircuitBreaker` (429):** a `429` `TripNow` reopens at
+     `min(retry_after, retry_after_cap)` when the header is present, else at the
+     `retry_after_fallback` default.
+   The §5 config field `throttle_cooldown` is **renamed `retry_after_fallback`** (its
+   sole role was this `429` default), and a new **`retry_after_cap`** bounds an honored
+   value — it may be set `≥ retry_after_fallback`, so a venue directing a *longer* legit
+   ban is honored (up to the cap) rather than probed early into it. `429` is **still
+   never retried** (§2 unchanged) — honoring only refines *existing* layer pacing.
+   Parsing is fallible and side-effect-free: an `HTTP-date`, a float, an overflowing
+   integer, or an absent header is treated as absent (falls back to existing behavior).
+   The `HTTP-date` form and alternate/absolute headers stay deferred — they need a
+   wall-clock `Timer` seam (ADR-0029). Lands the `delay-seconds` half of ADR-0034
+   Amendment #8's deferred "`Retry-After` parsing". Spec:
+   `docs/superpowers/specs/2026-07-08-net-http-retry-after-design.md`.
