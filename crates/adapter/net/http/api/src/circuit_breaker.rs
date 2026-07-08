@@ -220,7 +220,11 @@ impl Breaker {
     }
 
     /// Record a classified outcome, transitioning as ADR-0031 §5 dictates.
-    pub(crate) fn record(&mut self, class: Class, now: Instant) {
+    ///
+    /// `retry_after` is the delay-seconds value parsed from a `429` response's
+    /// `Retry-After` header (Amendment #2); it is consulted only in the
+    /// [`Class::TripNow`] arms below, clamped to `retry_after_cap`.
+    pub(crate) fn record(&mut self, class: Class, now: Instant, retry_after: Option<Duration>) {
         match self.state {
             BreakerState::Closed {
                 consecutive_failures,
@@ -238,8 +242,11 @@ impl Breaker {
                     };
                 },
                 Class::TripNow => {
+                    let cooldown = retry_after.map_or(self.cfg.retry_after_fallback, |ra| {
+                        ra.min(self.cfg.retry_after_cap)
+                    });
                     self.state = BreakerState::Open {
-                        reopen_at: deadline(now, self.cfg.retry_after_fallback),
+                        reopen_at: deadline(now, cooldown),
                     };
                 },
                 Class::Ignored => {}, // streak untouched — a 4xx/Auth neither trips nor resets
@@ -259,8 +266,11 @@ impl Breaker {
                     };
                 },
                 Class::TripNow => {
+                    let cooldown = retry_after.map_or(self.cfg.retry_after_fallback, |ra| {
+                        ra.min(self.cfg.retry_after_cap)
+                    });
                     self.state = BreakerState::Open {
-                        reopen_at: deadline(now, self.cfg.retry_after_fallback),
+                        reopen_at: deadline(now, cooldown),
                     };
                 },
                 // A reached-host probe (2xx/3xx or 4xx/Auth) resolves; the last one closes.
@@ -509,6 +519,14 @@ where
             // Record the classified outcome under a second short lock; capture any
             // trip/close/half-open transition and emit it after the lock drops.
             let class = classify(&outcome);
+            // Honor a delay-seconds `Retry-After` only on a 429 response (ADR-0031
+            // Amendment #2): it sets the reopen deadline, clamped by `retry_after_cap`.
+            let retry_after = match &outcome {
+                Ok(resp) if resp.status() == http::StatusCode::TOO_MANY_REQUESTS => {
+                    crate::retry_after::parse_retry_after(resp.headers())
+                },
+                _ => None,
+            };
             let transition = {
                 let now = self.timer.now();
                 let mut breaker = self
@@ -516,11 +534,14 @@ where
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner);
                 let before = breaker.phase();
-                breaker.record(class, now);
+                breaker.record(class, now, retry_after);
                 transition_label(before, breaker.phase())
             };
             if let Some(to) = transition {
                 crate::meter::breaker_transition(to);
+            }
+            if retry_after.is_some() {
+                crate::meter::retry_after_honored("breaker");
             }
             outcome
         }
@@ -602,10 +623,10 @@ mod breaker_tests {
         let now = Instant::now();
         let mut b = Breaker::new(cfg(3, 1));
         assert_eq!(b.admit(now), Admit::Pass);
-        b.record(Class::Failure, now);
-        b.record(Class::Failure, now);
+        b.record(Class::Failure, now, None);
+        b.record(Class::Failure, now, None);
         assert_eq!(b.admit(now), Admit::Pass, "still closed after 2 failures");
-        b.record(Class::Failure, now);
+        b.record(Class::Failure, now, None);
         assert_eq!(
             b.admit(now),
             Admit::Reject,
@@ -617,11 +638,11 @@ mod breaker_tests {
     fn a_success_resets_the_failure_streak() {
         let now = Instant::now();
         let mut b = Breaker::new(cfg(3, 1));
-        b.record(Class::Failure, now);
-        b.record(Class::Failure, now);
-        b.record(Class::Success, now); // reset
-        b.record(Class::Failure, now);
-        b.record(Class::Failure, now);
+        b.record(Class::Failure, now, None);
+        b.record(Class::Failure, now, None);
+        b.record(Class::Success, now, None); // reset
+        b.record(Class::Failure, now, None);
+        b.record(Class::Failure, now, None);
         assert_eq!(b.admit(now), Admit::Pass, "streak reset → not tripped");
     }
 
@@ -629,10 +650,10 @@ mod breaker_tests {
     fn ignored_does_not_reset_the_streak() {
         let now = Instant::now();
         let mut b = Breaker::new(cfg(3, 1));
-        b.record(Class::Failure, now);
-        b.record(Class::Ignored, now); // a 4xx does NOT reset — anti-masking
-        b.record(Class::Failure, now);
-        b.record(Class::Failure, now); // 3rd failure overall → trips
+        b.record(Class::Failure, now, None);
+        b.record(Class::Ignored, now, None); // a 4xx does NOT reset — anti-masking
+        b.record(Class::Failure, now, None);
+        b.record(Class::Failure, now, None); // 3rd failure overall → trips
         assert_eq!(
             b.admit(now),
             Admit::Reject,
@@ -644,7 +665,7 @@ mod breaker_tests {
     fn throttle_trips_immediately_on_the_long_cooldown() {
         let now = Instant::now();
         let mut b = Breaker::new(cfg(3, 1));
-        b.record(Class::TripNow, now); // one throttle → Open, no threshold needed
+        b.record(Class::TripNow, now, None); // one throttle → Open, no threshold needed
         assert_eq!(b.admit(now), Admit::Reject);
         assert_eq!(
             b.admit(now + Duration::from_secs(30)),
@@ -662,7 +683,7 @@ mod breaker_tests {
     fn open_rejects_until_cooldown_then_admits_one_probe() {
         let now = Instant::now();
         let mut b = Breaker::new(cfg(1, 1)); // trips on the first failure
-        b.record(Class::Failure, now);
+        b.record(Class::Failure, now, None);
         assert_eq!(b.admit(now), Admit::Reject);
         let after = now + Duration::from_secs(30);
         assert_eq!(
@@ -681,10 +702,10 @@ mod breaker_tests {
     fn half_open_probe_success_closes() {
         let now = Instant::now();
         let mut b = Breaker::new(cfg(1, 1));
-        b.record(Class::Failure, now);
+        b.record(Class::Failure, now, None);
         let after = now + Duration::from_secs(30);
         assert_eq!(b.admit(after), Admit::Probe);
-        b.record(Class::Success, after);
+        b.record(Class::Success, after, None);
         assert_eq!(b.admit(after), Admit::Pass, "probe succeeded → closed");
     }
 
@@ -692,10 +713,10 @@ mod breaker_tests {
     fn half_open_probe_ignored_also_closes() {
         let now = Instant::now();
         let mut b = Breaker::new(cfg(1, 1));
-        b.record(Class::Failure, now);
+        b.record(Class::Failure, now, None);
         let after = now + Duration::from_secs(30);
         assert_eq!(b.admit(after), Admit::Probe);
-        b.record(Class::Ignored, after); // a 4xx probe still proves the host is reachable
+        b.record(Class::Ignored, after, None); // a 4xx probe still proves the host is reachable
         assert_eq!(
             b.admit(after),
             Admit::Pass,
@@ -707,10 +728,10 @@ mod breaker_tests {
     fn half_open_probe_failure_reopens() {
         let now = Instant::now();
         let mut b = Breaker::new(cfg(1, 1));
-        b.record(Class::Failure, now);
+        b.record(Class::Failure, now, None);
         let after = now + Duration::from_secs(30);
         assert_eq!(b.admit(after), Admit::Probe);
-        b.record(Class::Failure, after); // probe fails → reopen with a fresh cooldown
+        b.record(Class::Failure, after, None); // probe fails → reopen with a fresh cooldown
         assert_eq!(b.admit(after), Admit::Reject, "re-opened");
         assert_eq!(
             b.admit(after + Duration::from_secs(30)),
@@ -727,10 +748,10 @@ mod breaker_tests {
         // reopen+30s still Reject; only at reopen+900s does the next probe admit.
         let now = Instant::now();
         let mut b = Breaker::new(cfg(1, 1)); // trips on the first failure
-        b.record(Class::Failure, now); // Closed → Open (30s cooldown)
+        b.record(Class::Failure, now, None); // Closed → Open (30s cooldown)
         let probe_at = now + Duration::from_secs(30);
         assert_eq!(b.admit(probe_at), Admit::Probe, "cooldown elapsed → probe");
-        b.record(Class::TripNow, probe_at); // 429 during the probe → long box
+        b.record(Class::TripNow, probe_at, None); // 429 during the probe → long box
         assert_eq!(
             b.admit(probe_at + Duration::from_secs(30)),
             Admit::Reject,
@@ -747,18 +768,18 @@ mod breaker_tests {
     fn multi_probe_half_open_requires_all_to_close() {
         let now = Instant::now();
         let mut b = Breaker::new(cfg(1, 2)); // 2 probes per episode
-        b.record(Class::Failure, now);
+        b.record(Class::Failure, now, None);
         let after = now + Duration::from_secs(30);
         assert_eq!(b.admit(after), Admit::Probe, "probe 1");
         assert_eq!(b.admit(after), Admit::Probe, "probe 2");
         assert_eq!(b.admit(after), Admit::Reject, "no probe 3 (gate)");
-        b.record(Class::Success, after); // 1 of 2
+        b.record(Class::Success, after, None); // 1 of 2
         assert_eq!(
             b.admit(after),
             Admit::Reject,
             "still half-open, awaiting the 2nd"
         );
-        b.record(Class::Success, after); // 2 of 2 → close
+        b.record(Class::Success, after, None); // 2 of 2 → close
         assert_eq!(b.admit(after), Admit::Pass, "both probes reached → closed");
     }
 
@@ -766,7 +787,7 @@ mod breaker_tests {
     fn abandoned_probe_reopens_half_open() {
         let now = Instant::now();
         let mut b = Breaker::new(cfg(1, 1));
-        b.record(Class::Failure, now); // → Open
+        b.record(Class::Failure, now, None); // → Open
         let after = now + Duration::from_secs(30);
         assert_eq!(
             b.admit(after),
@@ -790,15 +811,15 @@ mod breaker_tests {
     fn abandoned_probe_is_a_noop_in_closed() {
         let now = Instant::now();
         let mut b = Breaker::new(cfg(3, 1));
-        b.record(Class::Failure, now); // streak = 1
-        b.record(Class::Failure, now); // streak = 2
+        b.record(Class::Failure, now, None); // streak = 1
+        b.record(Class::Failure, now, None); // streak = 2
         b.on_abandoned_probe(now); // must NOT advance the streak
         assert_eq!(
             b.admit(now),
             Admit::Pass,
             "2 real failures < threshold 3 — abandon was a no-op"
         );
-        b.record(Class::Failure, now); // the 3rd REAL failure trips it
+        b.record(Class::Failure, now, None); // the 3rd REAL failure trips it
         assert_eq!(b.admit(now), Admit::Reject, "3rd real failure → tripped");
     }
 
@@ -806,7 +827,7 @@ mod breaker_tests {
     fn abandoned_probe_is_a_noop_in_open() {
         let now = Instant::now();
         let mut b = Breaker::new(cfg(1, 1));
-        b.record(Class::Failure, now); // → Open { reopen_at: now + 30s }
+        b.record(Class::Failure, now, None); // → Open { reopen_at: now + 30s }
         b.on_abandoned_probe(now + Duration::from_secs(5)); // must not push the deadline out
         assert_eq!(
             b.admit(now + Duration::from_secs(29)),
@@ -824,8 +845,8 @@ mod breaker_tests {
     fn record_while_open_never_untrips() {
         let now = Instant::now();
         let mut b = Breaker::new(cfg(1, 1));
-        b.record(Class::Failure, now); // → Open
-        b.record(Class::Success, now); // a stale success from a pre-trip admit
+        b.record(Class::Failure, now, None); // → Open
+        b.record(Class::Success, now, None); // a stale success from a pre-trip admit
         assert_eq!(
             b.admit(now),
             Admit::Reject,
@@ -842,12 +863,65 @@ mod breaker_tests {
             Admit::Pass,
             "closed → normal pass, not a probe"
         );
-        b.record(Class::Failure, now); // → Open
+        b.record(Class::Failure, now, None); // → Open
         let after = now + Duration::from_secs(30);
         assert_eq!(
             b.admit(after),
             Admit::Probe,
             "half-open admission is a probe"
+        );
+    }
+
+    #[test]
+    fn a_429_retry_after_reopens_on_the_honored_value() {
+        let now = Instant::now();
+        let mut b = Breaker::new(cfg(1, 1)); // trips on the first outcome
+        // 429 carrying Retry-After: 2 → reopen at now+2s (honored), under the 900s
+        // fallback and the 1800s cap.
+        b.record(Class::TripNow, now, Some(Duration::from_secs(2)));
+        assert_eq!(
+            b.admit(now + Duration::from_secs(1)),
+            Admit::Reject,
+            "before the honored 2s"
+        );
+        assert_eq!(
+            b.admit(now + Duration::from_secs(2)),
+            Admit::Probe,
+            "honored 2s elapsed → probe"
+        );
+    }
+
+    #[test]
+    fn a_429_retry_after_is_clamped_to_the_cap() {
+        let now = Instant::now();
+        let mut b = Breaker::new(cfg(1, 1)); // retry_after_cap = 1800s
+        b.record(Class::TripNow, now, Some(Duration::from_secs(100_000))); // absurd
+        assert_eq!(
+            b.admit(now + Duration::from_secs(1799)),
+            Admit::Reject,
+            "before the 1800s cap"
+        );
+        assert_eq!(
+            b.admit(now + Duration::from_secs(1800)),
+            Admit::Probe,
+            "clamped to the 1800s cap, not 100_000s"
+        );
+    }
+
+    #[test]
+    fn a_429_without_retry_after_uses_the_fallback() {
+        let now = Instant::now();
+        let mut b = Breaker::new(cfg(1, 1)); // retry_after_fallback = 900s
+        b.record(Class::TripNow, now, None);
+        assert_eq!(
+            b.admit(now + Duration::from_secs(899)),
+            Admit::Reject,
+            "before the 900s fallback"
+        );
+        assert_eq!(
+            b.admit(now + Duration::from_secs(900)),
+            Admit::Probe,
+            "fallback 900s elapsed → probe"
         );
     }
 }
@@ -870,6 +944,7 @@ mod service_tests {
     enum Step {
         Err(ErrorKind),
         Status(u16),
+        StatusRetryAfter(u16, u64),
     }
 
     fn err_of(kind: ErrorKind) -> HttpError {
@@ -922,6 +997,13 @@ mod service_tests {
                     Step::Status(code) => {
                         let mut resp = http::Response::new(());
                         *resp.status_mut() = http::StatusCode::from_u16(code).unwrap();
+                        Ok(resp)
+                    },
+                    Step::StatusRetryAfter(code, secs) => {
+                        let mut resp = http::Response::new(());
+                        *resp.status_mut() = http::StatusCode::from_u16(code).unwrap();
+                        resp.headers_mut()
+                            .insert(http::header::RETRY_AFTER, http::HeaderValue::from(secs));
                         Ok(resp)
                     },
                 }
@@ -1066,6 +1148,34 @@ mod service_tests {
             .call(bare_req())
             .await
             .expect("retry_after_fallback elapsed → probe → 200");
+        assert_eq!(ok.status(), http::StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn a_429_response_retry_after_reopens_on_the_honored_value() {
+        let timer = MockTimer::new();
+        // A single 429 carrying Retry-After: 5 trips the breaker; it must reopen at +5s
+        // (honored), NOT the 900s fallback. A probe at +5s reaches the leaf → 200.
+        let leaf = ScriptLeaf::new(vec![Step::StatusRetryAfter(429, 5), Step::Status(200)]);
+        let svc =
+            CircuitBreakerLayer::new(cfg(2, secs(30), secs(900), 1), timer.clone()).layer(leaf);
+        let resp = svc.call(bare_req()).await.expect("429 returns as Ok");
+        assert_eq!(resp.status(), http::StatusCode::TOO_MANY_REQUESTS);
+        // +4s is short of the honored 5s → still Open, fast-reject (leaf untouched).
+        timer.advance(secs(4));
+        assert!(
+            matches!(
+                svc.call(bare_req()).await.unwrap_err(),
+                HttpError::CircuitOpen
+            ),
+            "before the honored 5s the breaker still rejects"
+        );
+        // +1s more (total 5s) → probe admitted → reaches the leaf → 200.
+        timer.advance(secs(1));
+        let ok = svc
+            .call(bare_req())
+            .await
+            .expect("honored 5s elapsed → probe → 200");
         assert_eq!(ok.status(), http::StatusCode::OK);
     }
 
