@@ -5,7 +5,7 @@
 //! fails anyway. It trips **Open** after [`CircuitBreakerConfig::failure_threshold`]
 //! consecutive transport failures (`HttpError::{Connection, Timeout}` or a `5xx`
 //! response), or **immediately** on a venue **429 response** with the long
-//! [`CircuitBreakerConfig::throttle_cooldown`] (IBKR's ~15-minute penalty box). A
+//! [`CircuitBreakerConfig::retry_after_fallback`] (IBKR's ~15-minute penalty box). A
 //! `Throttled` *error* is a local pacing decision (the request was never sent) and
 //! is ignored — it never trips the breaker.
 //! While Open it **fast-rejects** every request with a non-retryable
@@ -43,8 +43,14 @@ pub struct CircuitBreakerConfig {
     pub failure_threshold: NonZeroU32,
     /// The cooldown before Half-Open probing after a failure-threshold trip.
     pub cooldown: Duration,
-    /// The (longer) cooldown after a `Throttled`/429 trip — the penalty box.
-    pub throttle_cooldown: Duration,
+    /// The `429` reopen wait when the response carries **no** usable `Retry-After`
+    /// (the penalty-box fallback; ≈ 10–15 min for IBKR). Renamed for clarity
+    /// (ADR-0031 Amendment #2).
+    pub retry_after_fallback: Duration,
+    /// Ceiling on an **honored** `429` `Retry-After`: `reopen = min(retry_after, cap)`.
+    /// May be set `≥ retry_after_fallback` to honor a directive *longer* than the
+    /// default box; also bounds a hostile/absurd `Retry-After` (ADR-0031 Amendment #2).
+    pub retry_after_cap: Duration,
     /// Probes admitted per Half-Open episode; all must reach the host to close.
     pub half_open_probes: NonZeroU32,
 }
@@ -233,7 +239,7 @@ impl Breaker {
                 },
                 Class::TripNow => {
                     self.state = BreakerState::Open {
-                        reopen_at: deadline(now, self.cfg.throttle_cooldown),
+                        reopen_at: deadline(now, self.cfg.retry_after_fallback),
                     };
                 },
                 Class::Ignored => {}, // streak untouched — a 4xx/Auth neither trips nor resets
@@ -254,7 +260,7 @@ impl Breaker {
                 },
                 Class::TripNow => {
                     self.state = BreakerState::Open {
-                        reopen_at: deadline(now, self.cfg.throttle_cooldown),
+                        reopen_at: deadline(now, self.cfg.retry_after_fallback),
                     };
                 },
                 // A reached-host probe (2xx/3xx or 4xx/Auth) resolves; the last one closes.
@@ -329,7 +335,8 @@ impl<T> CircuitBreakerLayer<T> {
     /// let cfg = CircuitBreakerConfig {
     ///     failure_threshold: NonZeroU32::new(3).unwrap(),
     ///     cooldown: Duration::from_secs(30),
-    ///     throttle_cooldown: Duration::from_secs(900),
+    ///     retry_after_fallback: Duration::from_secs(900),
+    ///     retry_after_cap: Duration::from_secs(1800),
     ///     half_open_probes: NonZeroU32::new(1).unwrap(),
     /// };
     /// let _layer = CircuitBreakerLayer::new(cfg, MockTimer::new());
@@ -584,7 +591,8 @@ mod breaker_tests {
         CircuitBreakerConfig {
             failure_threshold: NonZeroU32::new(threshold).unwrap(),
             cooldown: Duration::from_secs(30),
-            throttle_cooldown: Duration::from_secs(900),
+            retry_after_fallback: Duration::from_secs(900),
+            retry_after_cap: Duration::from_secs(1800),
             half_open_probes: NonZeroU32::new(probes).unwrap(),
         }
     }
@@ -646,7 +654,7 @@ mod breaker_tests {
         assert_eq!(
             b.admit(now + Duration::from_secs(900)),
             Admit::Probe,
-            "throttle_cooldown elapsed → first probe admitted"
+            "retry_after_fallback elapsed → first probe admitted"
         );
     }
 
@@ -714,7 +722,7 @@ mod breaker_tests {
     #[test]
     fn half_open_probe_429_reopens_on_the_long_cooldown() {
         // Trip on a normal failure (short 30s cooldown). At Half-Open, the probe returns
-        // a 429 (Class::TripNow) — the breaker must re-open on throttle_cooldown (900s),
+        // a 429 (Class::TripNow) — the breaker must re-open on retry_after_fallback (900s),
         // NOT the 30s cooldown a failing probe would use. Distinguish the two: at
         // reopen+30s still Reject; only at reopen+900s does the next probe admit.
         let now = Instant::now();
@@ -731,7 +739,7 @@ mod breaker_tests {
         assert_eq!(
             b.admit(probe_at + Duration::from_secs(900)),
             Admit::Probe,
-            "only throttle_cooldown reopens after a Half-Open 429 re-trip"
+            "only retry_after_fallback reopens after a Half-Open 429 re-trip"
         );
     }
 
@@ -924,13 +932,14 @@ mod service_tests {
     fn cfg(
         threshold: u32,
         cooldown: Duration,
-        throttle: Duration,
+        fallback: Duration,
         probes: u32,
     ) -> CircuitBreakerConfig {
         CircuitBreakerConfig {
             failure_threshold: NonZeroU32::new(threshold).unwrap(),
             cooldown,
-            throttle_cooldown: throttle,
+            retry_after_fallback: fallback,
+            retry_after_cap: Duration::from_secs(1800),
             half_open_probes: NonZeroU32::new(probes).unwrap(),
         }
     }
@@ -1007,7 +1016,7 @@ mod service_tests {
             svc.call(bare_req()).await.unwrap_err(),
             HttpError::CircuitOpen
         ));
-        timer.advance(secs(900)); // now past throttle_cooldown
+        timer.advance(secs(900)); // now past retry_after_fallback
         let resp = svc
             .call(bare_req())
             .await
@@ -1023,7 +1032,7 @@ mod service_tests {
     #[tokio::test]
     async fn a_429_during_a_half_open_probe_reopens_on_the_long_cooldown() {
         let timer = MockTimer::new();
-        // fail, fail → Open (30s); probe returns 429 → reopen on throttle_cooldown (900s);
+        // fail, fail → Open (30s); probe returns 429 → reopen on retry_after_fallback (900s);
         // final probe returns 200.
         let leaf = ScriptLeaf::new(vec![
             Step::Err(ErrorKind::Connection),
@@ -1049,14 +1058,14 @@ mod service_tests {
                 svc.call(bare_req()).await.unwrap_err(),
                 HttpError::CircuitOpen
             ),
-            "a 429 probe re-opened on throttle_cooldown, not the 30s cooldown"
+            "a 429 probe re-opened on retry_after_fallback, not the 30s cooldown"
         );
         // …but a further advance to a full 900s from the re-trip admits the next probe.
         timer.advance(secs(870)); // 30 + 870 = 900 total since the 429 re-trip
         let ok = svc
             .call(bare_req())
             .await
-            .expect("throttle_cooldown elapsed → probe → 200");
+            .expect("retry_after_fallback elapsed → probe → 200");
         assert_eq!(ok.status(), http::StatusCode::OK);
     }
 
