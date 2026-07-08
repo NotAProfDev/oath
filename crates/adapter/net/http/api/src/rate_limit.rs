@@ -715,4 +715,33 @@ mod tests {
             .await
             .expect("refilled after 5s");
     }
+
+    #[tokio::test]
+    async fn rate_park_loop_sleeps_then_refills_and_succeeds() {
+        // Snapshot = 2/s burst 2. Drain both tokens, then a third request with a
+        // GENEROUS max_wait must PARK in acquire_rate (timer.sleep), not throttle.
+        // Advancing the clock past the refill window wakes it and it succeeds — the
+        // proactive wait+refill path that every max_wait=0 test skips.
+        let timer = MockTimer::new();
+        let svc = layer(timer.clone(), Duration::from_secs(5)).layer(Leaf::ok(b"ok"));
+        svc.call(req(RateScope::Local(Key::Snapshot)))
+            .await
+            .expect("1st drains a token");
+        svc.call(req(RateScope::Local(Key::Snapshot)))
+            .await
+            .expect("2nd drains the last token");
+
+        // Third: bucket empty, but max_wait = 5s > the 500ms refill interval → it must
+        // park on timer.sleep rather than return Throttled. Spawn it, let it register
+        // the sleep, then advance the clock to refill one token and wake it.
+        let svc2 = svc.clone();
+        let waiter =
+            tokio::spawn(async move { svc2.call(req(RateScope::Local(Key::Snapshot))).await });
+        tokio::task::yield_now().await; // task locks the bucket, sees empty, arms timer.sleep
+        timer.advance(Duration::from_millis(500)); // 2 tokens/sec → +1 token, wakes the sleeper
+        waiter
+            .await
+            .unwrap()
+            .expect("parked request refilled within max_wait and succeeded");
+    }
 }
