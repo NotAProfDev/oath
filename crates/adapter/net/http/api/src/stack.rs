@@ -564,6 +564,56 @@ mod tests {
         assert!(matches!(err, HttpError::Timeout));
     }
 
+    // RateLimit sits OUTSIDE Timeout: a permit park is bounded by rate_limit_max_wait,
+    // never cut by the (shorter) send timeout. Drain the Snapshot bucket, then a further
+    // request parks; advance the clock PAST the 1s send timeout but within the 60s
+    // max_wait, refilling a token — the parked request must still succeed (its wait was
+    // NOT bounded by the send timeout). If the layers were swapped, the permit wait
+    // would inherit the 1s deadline and this would Timeout instead.
+    #[tokio::test]
+    async fn permit_wait_is_not_bounded_by_the_send_timeout() {
+        // RateLimit sits OUTSIDE Timeout: a permit park is bounded by rate_limit_max_wait,
+        // never cut by the (much shorter) send timeout. Send timeout = 100ms, max_wait =
+        // 60s. Drain Snapshot's 2 tokens, then a 3rd request parks on the empty bucket;
+        // advance 500ms — well PAST the 100ms send timeout, within max_wait — to refill a
+        // token. The parked request must SUCCEED: its wait was NOT cut by the send
+        // timeout. If RateLimit were INSIDE Timeout, the 100ms deadline would fire during
+        // the 500ms park and this would be Err(Timeout) instead. (The 500ms park > 100ms
+        // timeout is what makes the two arrangements distinguishable — a park shorter than
+        // the timeout would pass under both.)
+        let timer = MockTimer::new();
+        let leaf = ScriptLeaf::new(timer.clone(), vec![Step::Status(200)]);
+        let svc = stack(
+            leaf,
+            http_cfg(1, Duration::from_millis(100), Duration::from_secs(60)),
+            timer.clone(),
+            NoAuth,
+            rate_cfg(),
+        )
+        .expect("total config");
+
+        // Drain Snapshot's burst of 2.
+        svc.call(req(RateScope::Local(Key::Snapshot)))
+            .await
+            .expect("1");
+        svc.call(req(RateScope::Local(Key::Snapshot)))
+            .await
+            .expect("2");
+
+        // Third parks on the empty bucket. Spawn it, advance to 500ms (> the 100ms send
+        // timeout, one refill @ 2/s, well within max_wait) — it must still succeed.
+        let svc2 = svc.clone();
+        let waiter =
+            tokio::spawn(async move { svc2.call(req(RateScope::Local(Key::Snapshot))).await });
+        tokio::task::yield_now().await;
+        timer.advance(Duration::from_millis(500)); // past the 100ms send timeout; refills 1 token
+        let resp = waiter
+            .await
+            .unwrap()
+            .expect("parked permit refilled within max_wait — NOT cut by the 100ms send timeout");
+        assert_eq!(resp.status(), http::StatusCode::OK);
+    }
+
     // M5: the composed client's response `Body` is `Send`, so a whole response —
     // and its body — moves into `tokio::spawn` and drains there. This is exactly
     // the property the old `spawn_local` workaround existed to sidestep.
