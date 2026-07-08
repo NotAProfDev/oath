@@ -600,13 +600,22 @@ mod tests {
             .await
             .expect("2");
 
-        // Third parks on the empty bucket. Spawn it, advance to 500ms (> the 100ms send
-        // timeout, one refill @ 2/s, well within max_wait) — it must still succeed.
+        // Third parks on the empty bucket. Spawn it, then advance in TWO steps rather
+        // than a single 500ms jump: one advance would make the 100ms timeout deadline
+        // and the 500ms refill ready in the same poll, and `futures_util::select`
+        // polls the `call` arm first — so the park would win the race even under a
+        // swapped-in Timeout, hiding the bug this test exists to catch. Advancing to
+        // 150ms first and yielding lets a swapped-in Timeout actually fire at that
+        // intermediate tick, while the correct ordering (RateLimit outside Timeout)
+        // keeps parking; only then do we advance the remaining 350ms (500ms total) to
+        // refill a token.
         let svc2 = svc.clone();
         let waiter =
             tokio::spawn(async move { svc2.call(req(RateScope::Local(Key::Snapshot))).await });
-        tokio::task::yield_now().await;
-        timer.advance(Duration::from_millis(500)); // past the 100ms send timeout; refills 1 token
+        tokio::task::yield_now().await; // task parks on the empty Snapshot bucket
+        timer.advance(Duration::from_millis(150)); // past the 100ms send timeout, before the 500ms refill
+        tokio::task::yield_now().await; // poll the task at t=150ms — a swapped-in Timeout would fire NOW
+        timer.advance(Duration::from_millis(350)); // total 500ms → refills 1 token
         let resp = waiter
             .await
             .unwrap()
