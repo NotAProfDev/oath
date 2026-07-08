@@ -51,6 +51,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   decorrelates — a cloned `Retry` service draws a divergent jitter stream rather
   than replaying the parent's, so the ADR's clone-per-task pattern no longer
   synchronizes backoff across tasks (L3). Behaviour-preserving; no API change.
+- **net-http:** closed the Tier-1 resilience **test debt** (M10) and documentation
+  gaps (issue #101). Added regression tests for the rate-limiter wait+refill park loop
+  (`max_wait > 0`), exact refill rate, `RateScope::Both` acquire order, RateLimit-
+  outside-Timeout permit-wait, no burst over-admission, the Half-Open + 429 re-trip on
+  `throttle_cooldown`, the Retry backoff doubling ladder, and a SplitMix64 golden
+  vector; integration tests exercising the assembled `stack()` over the **real** hyper
+  leaf (reset→retry, 429→breaker-trip, send-timeout) plus a positive HTTP/2-keepalive
+  survival test. Added doctests for `stack`/`build`/`HttpClient`/`RateScope`/the layer
+  factories, a worked `examples/` + README for the mandatory per-request extension
+  protocol, and fixed stale rustdoc (L7/L8) and tautological rate-config tests (L12).
+  Test/docs only — no behaviour or public-API change. The loom concurrency model is
+  deliberately deferred (documented).
 
 ### Added
 
