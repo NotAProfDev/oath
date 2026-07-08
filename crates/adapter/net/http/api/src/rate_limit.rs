@@ -73,6 +73,12 @@ enum Bucket {
     Rate {
         refill_per_sec: f64,
         burst: f64,
+        // Concurrency-test note (loom): held only for the brief refill/consume
+        // critical section in `acquire_rate` below, and NEVER across an `.await`
+        // (the lock is dropped before `timer.sleep`). A loom interleaving model
+        // would add little over the clock-injected unit tests. Deferred
+        // deliberately (Tier-1 PR8/#101); revisit if the lock scope ever grows to
+        // span an await or the contention model changes.
         state: Mutex<TokenState>,
     },
     /// A concurrency semaphore with `max` permits.

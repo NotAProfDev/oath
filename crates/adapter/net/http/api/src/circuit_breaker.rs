@@ -379,6 +379,12 @@ impl<S, T: Clone> Layer<S> for CircuitBreakerLayer<T> {
 /// held across the `await`. Body-transparent — `http::Response<B>` is forwarded.
 pub struct CircuitBreaker<S, T> {
     inner: S,
+    // Concurrency-test note (loom): held only for the brief admit()/record()
+    // critical sections in `Service::call` below, and NEVER across an `.await`
+    // (see the struct doc above). A loom interleaving model would add little over
+    // the clock-injected `Breaker` unit tests. Deferred deliberately (Tier-1
+    // PR8/#101); revisit if the lock scope ever grows to span an await or the
+    // contention model changes.
     breaker: Arc<Mutex<Breaker>>,
     timer: T,
 }
