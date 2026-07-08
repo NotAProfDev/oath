@@ -24,10 +24,11 @@
 //!   rejections, retry attempts/backoff, permit-wait) and the `RouteTemplate`
 //!   cardinality seam, via the runtime-neutral `metrics` facade
 //! - [`stack()`] — `HttpConfig` and the `stack()` assembly composing the canonical
-//!   resilience order (ADR-0031 §1) over any leaf (Slice 2)
+//!   resilience order (ADR-0031 §1) over any leaf
 //!
-//! The resilience layers, `stack`/`build` assembly, and backends land in later
-//! slices. No async runtime, `hyper`, `reqwest`, or `serde` here.
+//! The resilience layers and `stack()` assembly live here; the `hyper` backend and
+//! `build()` construction surface live in `oath-adapter-net-http-hyper`. No async
+//! runtime, `hyper`, `reqwest`, or `serde` in this crate.
 #![forbid(unsafe_code)]
 
 pub mod auth;

@@ -19,7 +19,7 @@ tracing = { workspace = true }
 metrics = { workspace = true }
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["macros", "rt"] }
+tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread"] }
 oath-adapter-net-mock = { workspace = true }
 tracing-subscriber = { workspace = true }
 metrics-util = { workspace = true }
