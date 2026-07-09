@@ -229,3 +229,29 @@ Recorded append-only (the decision text above is unedited).
    wall-clock `Timer` seam (ADR-0029). Lands the `delay-seconds` half of ADR-0034
    Amendment #8's deferred "`Retry-After` parsing". Spec:
    `docs/superpowers/specs/2026-07-08-net-http-retry-after-design.md`.
+
+3. **Consecutive-count trip → count-based rolling error-rate window.** §5 shipped the
+   breaker with `failure_threshold` consecutive failures (*"consecutive-count for v1;
+   rolling-window later"*). That is blind to mixed-traffic degradation — a single
+   `Success` resets the streak, so a venue failing ~50 % of interleaved requests never
+   trips (deep-review §2B). **Changed:** in Closed, `CircuitBreaker` now trips when the
+   **failure rate** over the last `window_size` host-health outcomes reaches
+   `failure_rate_threshold` (%), once at least `minimum_calls` samples are present —
+   `len ≥ minimum_calls && failures*100 ≥ failure_rate_threshold*len` (integer, `≥`
+   trips). Only `Failure` (transport/`5xx`) and `Success` (`2xx`/`3xx`) enter the window;
+   a `4xx`/`Auth` (`Class::Ignored`) is never a sample, and a venue `429` (`TripNow`)
+   still trips **immediately** on `retry_after_fallback`/honored value (Amendment #2,
+   unchanged). The window is **count-based** (clock-free), chosen over time-based to
+   avoid a monotonic-seconds `Timer` seam; the accepted trade-off is **no idle-time
+   self-heal** — a stale failure patch lingers until flushed by new calls or a trip,
+   which resets the window to a clean slate on recovery. `Open`, `HalfOpen`, the
+   probe-guard, and single-per-host sharing are unchanged; per-key breakers remain
+   deferred (#102). **Config:** `CircuitBreakerConfig` drops `failure_threshold` and
+   gains `failure_rate_threshold: u8`, `window_size: NonZeroU32`, `minimum_calls:
+   NonZeroU32`, validated at boot (`failure_rate_threshold ∈ 1..=100`, `minimum_calls ≤
+   window_size`). The `to="open"` transition metric gains a `reason` label
+   (`rate`/`throttle`/`probe_failed`/`abandoned`). Prior art: resilience4j / Polly /
+   `tower-resilience-circuitbreaker` (rate + sliding window + minimum-calls); **not**
+   adopted — it is built on `tower::Service`, whereas OATH keeps its RPITIT `&self`
+   `Service`. Spec:
+   `docs/superpowers/specs/2026-07-09-net-http-rolling-window-breaker-design.md`.
