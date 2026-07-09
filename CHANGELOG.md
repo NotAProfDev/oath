@@ -77,6 +77,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   renamed `retry_after_fallback` (the `429` reopen wait when no usable `Retry-After` is
   present), and a new `retry_after_cap` bounds an honored `Retry-After` (both validated
   non-zero at `stack()`/`build()`).
+- **Breaking (pre-release) — net-http circuit-breaker trip policy.** The `CircuitBreaker`
+  now trips on a **rolling error-rate window** (last-N outcomes) rather than consecutive
+  failures, so a venue failing a sustained fraction of interleaved traffic is detected
+  (a 50 %-error host no longer resets an alarm on every success) — ADR-0031 Amendment #3.
+  `CircuitBreakerConfig` drops `failure_threshold` and gains `failure_rate_threshold`
+  (percent, `1..=100`), `window_size`, and `minimum_calls` (validated at boot). The
+  `http_circuit_breaker_transitions_total{to="open"}` metric gains a `reason` label
+  (`rate`/`throttle`/`probe_failed`/`abandoned`). Prior art: tower-resilience (not
+  adopted — OATH keeps its RPITIT `Service`).
 
 ### Added
 

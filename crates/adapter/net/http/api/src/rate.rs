@@ -149,6 +149,21 @@ pub enum BuildError {
     /// state). Symmetric with the pacing-parameter validation (deep review §2A).
     #[error("config field `{0}` must be a positive Duration, but is zero")]
     ZeroDuration(&'static str),
+    /// `circuit_breaker.failure_rate_threshold` is outside `1..=100` — a `0` would trip
+    /// on the first sample and a value `> 100` could never trip.
+    #[error("config field `circuit_breaker.failure_rate_threshold` must be in 1..=100, but is {0}")]
+    RateThresholdRange(u8),
+    /// `circuit_breaker.minimum_calls` (`{0}`) exceeds `window_size` (`{1}`) — the window
+    /// can never hold enough samples to reach the floor, so the breaker could never trip
+    /// on rate.
+    #[error("config field `circuit_breaker.minimum_calls` ({0}) must be <= `window_size` ({1})")]
+    MinCallsExceedWindow(u32, u32),
+    /// `circuit_breaker.window_size` (`{0}`) exceeds the sanity ceiling (`{1}`) — a
+    /// window far larger than any sensible "recent health" span is almost always a
+    /// units/typo mistake, and `RateWindow::new` would eagerly allocate (and
+    /// re-allocate on every Half-Open→Closed recovery) a `VecDeque` of that size.
+    #[error("config field `circuit_breaker.window_size` ({0}) exceeds the sanity ceiling ({1})")]
+    WindowSizeTooLarge(u32, u32),
 }
 
 /// Validate that `cfg` is a **total**, param-sane pacing configuration.
