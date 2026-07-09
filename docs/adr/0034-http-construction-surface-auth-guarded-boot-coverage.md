@@ -269,7 +269,7 @@ carries the full reasoning.
     assembled — `stack()` does **not** call `validate_coverage` separately. `Auth`/
     `SetHeaders` are direct `Service` wrappers (no `Layer` factory), so they pre-wrap
     the leaf; the five `Layer`-factory layers compose over that via the kernel's
-    `ServiceBuilder`. The return bound is the full `impl HttpClient + Clone + Send +
+    `LayerBuilder`. The return bound is the full `impl HttpClient + Clone + Send +
     Sync + 'static` (not bare `impl HttpClient`), so a `Send`/`Clone`/`'static`
     regression in any layer is a compile error *at `stack()`*; `build()` (the following
     hyper-backend slice) reuses this bound over the hyper leaf. `HttpConfig` is

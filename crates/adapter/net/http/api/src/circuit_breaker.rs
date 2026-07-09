@@ -377,7 +377,7 @@ impl<T> fmt::Debug for CircuitBreakerLayer<T> {
 }
 
 impl<S, T: Clone> Layer<S> for CircuitBreakerLayer<T> {
-    type Service = CircuitBreaker<S, T>;
+    type Wrapped = CircuitBreaker<S, T>;
 
     fn layer(&self, inner: S) -> CircuitBreaker<S, T> {
         CircuitBreaker {

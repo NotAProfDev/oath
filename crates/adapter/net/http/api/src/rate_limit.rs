@@ -195,7 +195,7 @@ impl<S, K, T> Layer<S> for RateLimitLayer<K, T>
 where
     T: Clone,
 {
-    type Service = RateLimit<S, K, T>;
+    type Wrapped = RateLimit<S, K, T>;
 
     fn layer(&self, inner: S) -> RateLimit<S, K, T> {
         RateLimit {

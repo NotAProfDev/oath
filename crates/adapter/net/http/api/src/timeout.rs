@@ -78,7 +78,7 @@ impl<T> fmt::Debug for TimeoutLayer<T> {
 }
 
 impl<S, T: Clone> Layer<S> for TimeoutLayer<T> {
-    type Service = Timeout<S, T>;
+    type Wrapped = Timeout<S, T>;
 
     fn layer(&self, inner: S) -> Timeout<S, T> {
         Timeout {
