@@ -266,7 +266,7 @@ picked up — the streaming analogue of ADR-0031 §1's per-attempt re-stamp.
 
 ## Relationships
 
-Fills the WebSocket contract **ADR-0029** deferred, on its kernel (`Layer`/`ServiceBuilder`,
+Fills the WebSocket contract **ADR-0029** deferred, on its kernel (`Layer`/`LayerBuilder`,
 `ErrorKind`, `Timer` unchanged). Mirrors **ADR-0030** (the HTTP sibling) and reuses its
 `AuthSource` seam (**ADR-0031** §1 per-attempt re-stamp). Rests on **ADR-0007** (in-process ⇒
 compile-time `impl` seam, no `dyn`) and **ADR-0003** (anti-corruption: grammar/typing in the

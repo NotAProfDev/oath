@@ -174,7 +174,7 @@ pub fn build<T: Timer>(cfg: HttpConfig, timer: T, auth: impl AuthSource, …) ->
   adapter, which maps its own deserialised settings into these structs.
 - **Three tiers:** *use* the default (`build`); *add* layers by wrapping the returned
   `impl HttpClient` (e.g. IBKR's effectful session-keepalive `tickle`, which is **not** a
-  net-http layer); or *replace/reorder* by assembling `ServiceBuilder` from the public
+  net-http layer); or *replace/reorder* by assembling `LayerBuilder` from the public
   parts, with the documented order as reference. Batteries included, batteries removable.
 
 ## Considered options
