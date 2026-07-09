@@ -40,6 +40,7 @@ pub mod error;
 pub mod meter;
 pub mod rate;
 pub mod rate_limit;
+mod rate_window;
 pub mod retry;
 mod retry_after;
 pub mod service;
