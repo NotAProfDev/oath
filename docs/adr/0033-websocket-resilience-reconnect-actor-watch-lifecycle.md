@@ -43,7 +43,7 @@ IBKR-shaped assumption that OOMs on venue #2.
 
 ### 1. Composition: a uniform `WsConnector` *inside*, a richer `ReconnectingConnection` *out*
 
-The kernel's `Layer`/`ServiceBuilder` (ADR-0029 §3, deliberately `Service`-bound-free) is
+The kernel's `Layer`/`LayerBuilder` (ADR-0029 §3, deliberately `Service`-bound-free) is
 reused to *assemble* the stack — but that reuse is **assembly ergonomics, not the abstraction
 doing the resilience work.** Industry hand-assembles the frame half of a resilient socket; it
 does not model reconnect/heartbeat/buffer as a generic middleware stack. What is load-bearing
@@ -76,7 +76,7 @@ trait ReconnectingConnector {                        // usage seam — the facto
 ```
 
 The reconnect layer is the exact **`Layer → Service` analogue** from tower: you compose
-`Layer`s but *hold* a `Service` (`ServiceBuilder` yields a `Buffer<Retry<…>>` used as a
+`Layer`s but *hold* a `Service` (`LayerBuilder` yields a `Buffer<Retry<…>>` used as a
 `Service`, never as a `Layer`). Composition unit ≠ product type. So the leaf never grows a
 control handle it cannot honour — `force_reconnect` on a raw socket would be a silent no-op,
 the class of dishonest seam this crate's charter forbids. An adapter that genuinely wants a
@@ -113,7 +113,7 @@ crate, mock-testable and backend-reusable.
 ADR-0031's single line (`Tracing → CircuitBreaker → Retry → RateLimit → Timeout →
 BufferOrStream → Auth → leaf`) does not transliterate, because WS concerns split across two
 axes rather than one per-request `call`. (First `.layer()` is outermost — ADR-0029's
-`ServiceBuilder` invariant.)
+`LayerBuilder` invariant.)
 
 ```text
 Connect-time (per (re)connect):  Tracing → Reconnect(backoff, epoch) → ConnectTimeout → Auth → leaf.connect

@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking (pre-release) — net compose vocabulary.** Renamed the transport-neutral
+  composition machinery in `oath-adapter-net-api` to match its `Service`-agnostic role
+  (ADR-0029 §3): `ServiceBuilder` → `LayerBuilder`, the `Layer::Service` associated type
+  → `Layer::Wrapped`, and the `ServiceBuilder::service()` finalizer → `LayerBuilder::wrap()`.
+  The composition *unit* is shared across transports, but the assembled *product* is
+  transport-specific (an HTTP `Service` today, a WS reconnect connector per ADR-0033),
+  so the output type no longer misnames itself `Service`. The per-transport `Service`
+  request/reply trait in `oath-adapter-net-http-api` is unchanged. Also dropped the
+  unused `Copy` derive from `Identity`/`Stack` (nothing copies them; `Clone` retained).
+  No behaviour change.
 - Began the ADR-0029 network-adapter repartition: `oath-adapter-net-api` is now the
   transport-neutral, **std-only** kernel (composition machinery + `ErrorKind` +
   the new runtime-neutral `Timer` clock); the `Service` request/reply contract moved

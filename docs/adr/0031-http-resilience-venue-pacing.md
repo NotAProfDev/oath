@@ -37,7 +37,7 @@ limit, that own limit is rate *xor* concurrency, and we must *never* hit a 429.
 Tracing → CircuitBreaker → Retry → RateLimit → Timeout → BufferOrStream → Auth → leaf
 ```
 
-(First `.layer()` is outermost — ADR-0029's `ServiceBuilder` invariant.) Rationale for
+(First `.layer()` is outermost — ADR-0029's `LayerBuilder` invariant.) Rationale for
 the order: `Tracing` spans the whole logical request (including retries and pacing
 waits); `CircuitBreaker` short-circuits *before* `Retry` runs (§5); `RateLimit` is
 *inside* `Retry` so each attempt spends budget; `Timeout` bounds the send, not the

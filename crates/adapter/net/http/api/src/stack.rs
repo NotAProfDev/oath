@@ -7,7 +7,7 @@
 //! so a coverage/param error is a [`BuildError`] before the
 //! rest is assembled. `Auth`/`SetHeaders` are direct `Service` wrappers (no
 //! `Layer` factory), so they pre-wrap the leaf; the five `Layer`-factory layers
-//! compose over that via [`ServiceBuilder`]
+//! compose over that via [`LayerBuilder`]
 //! (first `.layer()` = outermost). The composed value satisfies
 //! [`HttpClient`] by blanket impl.
 
@@ -16,7 +16,7 @@ use crate::{
     Auth, AuthSource, CircuitBreakerConfig, CircuitBreakerLayer, HttpClient, RateLimitLayer,
     RetryConfig, RetryLayer, SetHeaders, TimeoutLayer, TracingLayer,
 };
-use oath_adapter_net_api::{ServiceBuilder, Timer};
+use oath_adapter_net_api::{LayerBuilder, Timer};
 use std::fmt;
 use std::time::Duration;
 
@@ -171,13 +171,13 @@ where
     let rate = RateLimitLayer::new(&rate_limits, timer.clone(), cfg.rate_limit_max_wait)?;
     // The two innermost layers are direct wrappers, not `Layer` factories.
     let inner = SetHeaders::new(Auth::new(leaf, auth), cfg.headers);
-    let svc = ServiceBuilder::new()
+    let svc = LayerBuilder::new()
         .layer(TracingLayer::new(timer.clone())) // outermost
         .layer(CircuitBreakerLayer::new(cfg.circuit_breaker, timer.clone()))
         .layer(RetryLayer::new(cfg.retry, timer.clone()))
         .layer(rate)
         .layer(TimeoutLayer::new(cfg.timeout, timer)) // innermost Layer-factory
-        .service(inner);
+        .wrap(inner);
     Ok(svc)
 }
 

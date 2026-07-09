@@ -182,7 +182,7 @@ impl<T> fmt::Debug for RetryLayer<T> {
 }
 
 impl<S, T: Clone> Layer<S> for RetryLayer<T> {
-    type Service = Retry<S, T>;
+    type Wrapped = Retry<S, T>;
 
     fn layer(&self, inner: S) -> Retry<S, T> {
         Retry {

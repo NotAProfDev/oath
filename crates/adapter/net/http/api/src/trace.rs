@@ -78,7 +78,7 @@ impl<T> fmt::Debug for TracingLayer<T> {
 }
 
 impl<S, T: Clone> Layer<S> for TracingLayer<T> {
-    type Service = Tracing<S, T>;
+    type Wrapped = Tracing<S, T>;
 
     fn layer(&self, inner: S) -> Tracing<S, T> {
         Tracing {

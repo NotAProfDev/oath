@@ -3,7 +3,7 @@
 [ADR-0009](0009-crate-topology-spine-inverted-process-aligned.md) placed
 `oath-adapter-net-api` in the topology as "HTTP/WS composition primitives," and the
 skeleton shipped a Tower-shaped composition core (`Service`, `Layer`,
-`ServiceBuilder`, `Stack`, `Identity`) plus a coarse `ErrorKind` / `HasErrorKind`
+`LayerBuilder`, `Stack`, `Identity`) plus a coarse `ErrorKind` / `HasErrorKind`
 classifier in one crate. Landing the first [Broker](../../CONTEXT.md) — Interactive
 Brokers' Client Portal Web API — forces the question that skeleton deferred: *one net
 crate, or many?* This ADR **splits the net layer by transport**, fixes what is
@@ -25,7 +25,7 @@ contract crate per transport, plus leaf backends:
 
 ```text
 oath-adapter-net-api            kernel — transport-neutral, std-only:
-                                  Layer, ServiceBuilder, Stack, Identity,
+                                  Layer, LayerBuilder, Stack, Identity,
                                   ErrorKind, HasErrorKind, Timer
    ├── oath-adapter-net-http-api   HTTP/REST contracts  (depends on net-api)
    │     └── oath-adapter-net-http-hyper   leaf backend (hyper-util + rustls)
@@ -45,7 +45,7 @@ does **not** model the other transports' core operation:
 
 | Kernel symbol | REST | WebSocket | FIX / TCP session | UDP multicast (recv-only) |
 |---|---|---|---|---|
-| `Layer` / `ServiceBuilder` / `Stack` / `Identity` | ✓ | ✓ | ✓ | ✓ |
+| `Layer` / `LayerBuilder` / `Stack` / `Identity` | ✓ | ✓ | ✓ | ✓ |
 | `ErrorKind` / `HasErrorKind` | ✓ | ✓ | ✓ | ~ |
 | `Service<Req>` (request→one reply) | ✓ | ✗ subscription yields *many* frames | ✗ async session | ✗ no request at all |
 
@@ -62,7 +62,7 @@ build that crate now (YAGNI); we have one request/reply transport.
 
 ### 3. The composition machinery is `Service`-free and stays in the kernel
 
-`Layer<S>` carries **no `Service` bound** — it wraps *anything*. `ServiceBuilder`,
+`Layer<S>` carries **no `Service` bound** — it wraps *anything*. `LayerBuilder`,
 `Stack`, and `Identity` likewise compose an arbitrary `S`. That is exactly why they
 belong in the kernel: the same machinery composes an HTTP `Service` stack today and a
 WS subscription stack tomorrow. `ErrorKind` / `HasErrorKind` are coarse, wire-neutral
@@ -149,3 +149,15 @@ plumbing, role translation stays in the concrete adapter). Is the base for
 **ADR-0030** (HTTP transport contract) and **ADR-0031** (HTTP resilience & pacing).
 Glossary: no change — `Service`, `Layer`, `HttpClient`, `Timer` are implementation
 vocabulary, and [CONTEXT.md](../../CONTEXT.md) is domain-only.
+
+## Amendments
+
+- **2026-07-09 — composition vocabulary made transport-neutral.** The kernel's
+  composition names were renamed to match the `Service`-free intent of §3: the
+  composition *unit* is shared, but the assembled *product* is transport-specific (an
+  HTTP `Service` today, a WS `ReconnectingConnection` per ADR-0033), so it must not name
+  itself `Service`. `ServiceBuilder` → `LayerBuilder`; the `Layer::Service` associated
+  type → `Layer::Wrapped`; the finalizer `ServiceBuilder::service()` → `LayerBuilder::wrap()`.
+  The per-transport `Service` request/reply trait (§2) is **unchanged**, as is every
+  `ErrorKind` / `Timer` name. The prose above uses the current names; the mechanical
+  change is recorded in the CHANGELOG.

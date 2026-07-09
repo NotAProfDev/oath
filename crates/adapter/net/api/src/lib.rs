@@ -4,7 +4,7 @@
 //! clean). It defines the shared abstractions every transport's layers depend
 //! on:
 //!
-//! - [`compose`] — `Layer`, `ServiceBuilder`, `Identity`, `Stack`
+//! - [`compose`] — `Layer`, `LayerBuilder`, `Identity`, `Stack`
 //! - [`error_kind`] — `ErrorKind`, `HasErrorKind`
 //! - [`timer`] — `Timer`
 //!
@@ -16,6 +16,6 @@ pub mod compose;
 pub mod error_kind;
 pub mod timer;
 
-pub use compose::{Identity, Layer, ServiceBuilder, Stack};
+pub use compose::{Identity, Layer, LayerBuilder, Stack};
 pub use error_kind::{ErrorKind, HasErrorKind};
 pub use timer::Timer;
