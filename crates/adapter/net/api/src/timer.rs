@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 /// Timing middleware (`Timeout`, `Retry` backoff, `RateLimit` refill,
 /// `CircuitBreaker` cooldown) is generic over `Timer` so a mock clock can drive
 /// it deterministically in tests while production passes a runtime-backed impl.
-/// A trait — not a runtime — so the kernel stays std-only (ADR-0029 §4).
+/// A trait — not a runtime — so the kernel stays std-only.
 pub trait Timer: Clone + Send + Sync {
     /// Complete after `dur` has elapsed.
     fn sleep(&self, dur: Duration) -> impl Future<Output = ()> + Send;

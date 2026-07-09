@@ -1,11 +1,11 @@
 //! Composition machinery: `Layer`, `LayerBuilder`, `Identity`, `Stack`.
 //!
-//! These compose **anything** — `Layer<S>` carries no `Service` bound (ADR-0029
-//! §3), so the same machinery composes an HTTP `Service` stack today and a WS
-//! subscription stack tomorrow. The composition *unit* (`Layer` / `LayerBuilder`
-//! / `Stack`) is shared; the assembled *product* is transport-specific (an HTTP
-//! `Service`, a WS reconnect connector, …), which is why the output type is
-//! named [`Layer::Wrapped`], not `Service`.
+//! These compose **anything** — `Layer<T>` places no bound on `T`, so the same
+//! machinery composes an HTTP `Service` stack today and a WebSocket subscription
+//! stack tomorrow. The composition *unit* (`Layer` / `LayerBuilder` / `Stack`) is
+//! shared; the assembled *product* is transport-specific (an HTTP `Service`, a WS
+//! reconnect connector, …), which is why the output type is named
+//! [`Layer::Wrapped`], not `Service`.
 //!
 //! # Ordering invariant
 //!
@@ -16,8 +16,8 @@
 //! # use oath_adapter_net_api::compose::{Layer, LayerBuilder};
 //! # struct TracingLayer;
 //! # struct MetricsLayer;
-//! # impl<S> Layer<S> for TracingLayer { type Wrapped = S; fn layer(&self, s: S) -> S { s } }
-//! # impl<S> Layer<S> for MetricsLayer { type Wrapped = S; fn layer(&self, s: S) -> S { s } }
+//! # impl<T> Layer<T> for TracingLayer { type Wrapped = T; fn layer(&self, inner: T) -> T { inner } }
+//! # impl<T> Layer<T> for MetricsLayer { type Wrapped = T; fn layer(&self, inner: T) -> T { inner } }
 //! // TracingLayer is added first → outermost → wraps everything else.
 //! let _svc = LayerBuilder::new()
 //!     .layer(TracingLayer) // outermost
@@ -25,12 +25,12 @@
 //!     .wrap(());           // leaf: any value (a `Service` leaf lives in net-http-api)
 //! ```
 
-/// Wrap a value of type `S`, producing a new value that adds behaviour.
+/// Wrap a value of type `T`, producing a new value that adds behaviour.
 ///
 /// Typically a struct that holds configuration and owns an inner value. The
 /// outer layer's [`Layer::layer`] method wraps the inner value, producing a
 /// new value that adds the layer's behaviour.
-pub trait Layer<S> {
+pub trait Layer<T> {
     /// The wrapped type produced by this layer.
     ///
     /// Transport-neutral: it is an HTTP `Service` for an HTTP stack, a WS
@@ -39,7 +39,7 @@ pub trait Layer<S> {
     type Wrapped;
 
     /// Wrap `inner` with this layer's behaviour.
-    fn layer(&self, inner: S) -> Self::Wrapped;
+    fn layer(&self, inner: T) -> Self::Wrapped;
 }
 
 /// Type-safe layer compositor.
@@ -91,9 +91,10 @@ impl<L> LayerBuilder<L> {
     /// Consumes the builder and returns the fully composed value.
     /// The concrete type is fully resolved at compile time — no boxing, no
     /// `dyn`.
-    pub fn wrap<S>(self, inner: S) -> L::Wrapped
+    #[must_use]
+    pub fn wrap<T>(self, inner: T) -> L::Wrapped
     where
-        L: Layer<S>,
+        L: Layer<T>,
     {
         self.layer.layer(inner)
     }
@@ -105,10 +106,10 @@ impl<L> LayerBuilder<L> {
 #[derive(Debug, Clone)]
 pub struct Identity;
 
-impl<S> Layer<S> for Identity {
-    type Wrapped = S;
+impl<T> Layer<T> for Identity {
+    type Wrapped = T;
 
-    fn layer(&self, inner: S) -> S {
+    fn layer(&self, inner: T) -> T {
         inner
     }
 }
@@ -129,16 +130,80 @@ pub struct Stack<Inner, Outer> {
     outer: Outer,
 }
 
-impl<S, Inner, Outer> Layer<S> for Stack<Inner, Outer>
+impl<T, Inner, Outer> Layer<T> for Stack<Inner, Outer>
 where
-    Inner: Layer<S>,
+    Inner: Layer<T>,
     Outer: Layer<Inner::Wrapped>,
 {
     type Wrapped = Outer::Wrapped;
 
-    fn layer(&self, value: S) -> Outer::Wrapped {
+    fn layer(&self, value: T) -> Outer::Wrapped {
         // Apply Inner first (closer to the leaf), then wrap with Outer.
         let wrapped = self.inner.layer(value);
         self.outer.layer(wrapped)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Identity, Layer, LayerBuilder, Stack};
+    use core::mem::size_of;
+
+    // A layer that parenthesises a `String` under its tag, making the composition
+    // nesting — and therefore the ordering invariant — directly observable:
+    // `Tag("A").layer("x".into()) == "A(x)"`.
+    struct Tag(&'static str);
+
+    impl Layer<String> for Tag {
+        type Wrapped = String;
+
+        fn layer(&self, inner: String) -> String {
+            format!("{}({})", self.0, inner)
+        }
+    }
+
+    #[test]
+    fn first_layer_is_outermost() {
+        // `A` is added first, so it must end up outermost — wrapping `B`, which in
+        // turn wraps the leaf. This is the module's load-bearing ordering invariant.
+        let composed = LayerBuilder::new()
+            .layer(Tag("A"))
+            .layer(Tag("B"))
+            .wrap(String::from("leaf"));
+        assert_eq!(composed, "A(B(leaf))");
+    }
+
+    #[test]
+    fn empty_builder_returns_the_leaf_unchanged() {
+        // A fresh builder is just `Identity`, so it hands the leaf back as-is.
+        let composed = LayerBuilder::new().wrap(String::from("leaf"));
+        assert_eq!(composed, "leaf");
+    }
+
+    #[test]
+    fn identity_in_the_middle_is_a_noop() {
+        // An explicit `Identity` layer must not affect the composed result.
+        let composed = LayerBuilder::new()
+            .layer(Tag("A"))
+            .layer(Identity)
+            .layer(Tag("B"))
+            .wrap(String::from("leaf"));
+        assert_eq!(composed, "A(B(leaf))");
+    }
+
+    #[test]
+    fn default_matches_new() {
+        let via_default = LayerBuilder::<Identity>::default().wrap(String::from("x"));
+        let via_new = LayerBuilder::new().wrap(String::from("x"));
+        assert_eq!(via_default, via_new);
+    }
+
+    #[test]
+    fn composition_machinery_is_zero_sized() {
+        // The no-op layer, a fresh builder, and a stack of ZST layers all cost
+        // zero bytes — the "no boxing, no dyn" promise made testable.
+        assert_eq!(size_of::<Identity>(), 0);
+        assert_eq!(size_of::<LayerBuilder<Identity>>(), 0);
+        assert_eq!(size_of::<Stack<Identity, Identity>>(), 0);
     }
 }
