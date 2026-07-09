@@ -158,6 +158,12 @@ pub enum BuildError {
     /// on rate.
     #[error("config field `circuit_breaker.minimum_calls` ({0}) must be <= `window_size` ({1})")]
     MinCallsExceedWindow(u32, u32),
+    /// `circuit_breaker.window_size` (`{0}`) exceeds the sanity ceiling (`{1}`) — a
+    /// window far larger than any sensible "recent health" span is almost always a
+    /// units/typo mistake, and `RateWindow::new` would eagerly allocate (and
+    /// re-allocate on every Half-Open→Closed recovery) a `VecDeque` of that size.
+    #[error("config field `circuit_breaker.window_size` ({0}) exceeds the sanity ceiling ({1})")]
+    WindowSizeTooLarge(u32, u32),
 }
 
 /// Validate that `cfg` is a **total**, param-sane pacing configuration.

@@ -249,7 +249,8 @@ Recorded append-only (the decision text above is unedited).
    deferred (#102). **Config:** `CircuitBreakerConfig` drops `failure_threshold` and
    gains `failure_rate_threshold: u8`, `window_size: NonZeroU32`, `minimum_calls:
    NonZeroU32`, validated at boot (`failure_rate_threshold ∈ 1..=100`, `minimum_calls ≤
-   window_size`). The `to="open"` transition metric gains a `reason` label
+   window_size`, and `window_size ≤` a sanity ceiling so a units/typo mistake can't
+   force a huge `RateWindow` allocation). The `to="open"` transition metric gains a `reason` label
    (`rate`/`throttle`/`probe_failed`/`abandoned`). Prior art: resilience4j / Polly /
    `tower-resilience-circuitbreaker` (rate + sliding window + minimum-calls); **not**
    adopted — it is built on `tower::Service`, whereas OATH keeps its RPITIT `&self`

@@ -185,15 +185,21 @@ where
 /// configure: `timeout == 0` (every send instantly `Timeout`) and the breaker's
 /// `cooldown`/`retry_after_fallback`/`retry_after_cap == 0` (Open collapses straight
 /// back to Half-Open). Also rejects an out-of-range `failure_rate_threshold` (must be
-/// `1..=100`) and a `minimum_calls` that exceeds `window_size` (ADR-0031 Amendment #3).
+/// `1..=100`), a `minimum_calls` that exceeds `window_size`, and a `window_size`
+/// above a sanity ceiling (ADR-0031 Amendment #3).
 ///
 /// `rate_limit_max_wait` and the retry backoff (`base`/`cap`) may legitimately be
 /// zero (throttle-immediately / no-backoff), so they are **not** checked.
 ///
 /// # Errors
 /// [`BuildError::ZeroDuration`] naming the first offending field,
-/// [`BuildError::RateThresholdRange`], or [`BuildError::MinCallsExceedWindow`].
+/// [`BuildError::RateThresholdRange`], [`BuildError::MinCallsExceedWindow`], or
+/// [`BuildError::WindowSizeTooLarge`].
 const fn validate_config(cfg: &HttpConfig) -> Result<(), BuildError> {
+    // Sanity ceiling for `window_size`: a window far larger than any sensible "recent
+    // health" span is almost always a units/typo mistake, and `RateWindow::new` would
+    // eagerly allocate (and re-allocate on every recovery) a `VecDeque` of that size.
+    const MAX_WINDOW_SIZE: u32 = 10_000;
     if cfg.timeout.is_zero() {
         return Err(BuildError::ZeroDuration("timeout"));
     }
@@ -219,6 +225,12 @@ const fn validate_config(cfg: &HttpConfig) -> Result<(), BuildError> {
         return Err(BuildError::MinCallsExceedWindow(
             cfg.circuit_breaker.minimum_calls.get(),
             cfg.circuit_breaker.window_size.get(),
+        ));
+    }
+    if cfg.circuit_breaker.window_size.get() > MAX_WINDOW_SIZE {
+        return Err(BuildError::WindowSizeTooLarge(
+            cfg.circuit_breaker.window_size.get(),
+            MAX_WINDOW_SIZE,
         ));
     }
     Ok(())
@@ -597,6 +609,19 @@ mod tests {
         assert_eq!(
             stack(leaf, cfg, timer, NoAuth, rate_cfg()).err(),
             Some(BuildError::MinCallsExceedWindow(11, 10)),
+        );
+    }
+
+    #[test]
+    fn rejects_an_oversized_window() {
+        let timer = MockTimer::new();
+        let leaf = ScriptLeaf::new(timer.clone(), vec![Step::Status(200)]);
+        let mut cfg = http_cfg(1, Duration::from_secs(1), Duration::ZERO);
+        // A units/typo mistake: a window far beyond any sane "recent health" span.
+        cfg.circuit_breaker.window_size = NonZeroU32::new(10_001).unwrap();
+        assert_eq!(
+            stack(leaf, cfg, timer, NoAuth, rate_cfg()).err(),
+            Some(BuildError::WindowSizeTooLarge(10_001, 10_000)),
         );
     }
 
