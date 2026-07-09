@@ -167,6 +167,31 @@ impl Phase {
     }
 }
 
+/// Why the breaker transitioned to `Open` — a low-cardinality telemetry reason.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TripReason {
+    /// The rolling failure rate crossed the threshold.
+    Rate,
+    /// A venue `429` response (`TripNow`) — the penalty box.
+    Throttle,
+    /// A Half-Open probe failed.
+    ProbeFailed,
+    /// A Half-Open probe was abandoned (cancelled / panicked).
+    Abandoned,
+}
+
+impl TripReason {
+    /// The stable, low-cardinality telemetry label.
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Rate => "rate",
+            Self::Throttle => "throttle",
+            Self::ProbeFailed => "probe_failed",
+            Self::Abandoned => "abandoned",
+        }
+    }
+}
+
 /// The label for a phase change, or `None` when the phase is unchanged — the shell
 /// emits a `http_circuit_breaker_transitions_total{to}` count for each `Some`.
 fn transition_label(before: Phase, after: Phase) -> Option<&'static str> {
@@ -230,7 +255,12 @@ impl Breaker {
     /// the rate crosses the threshold (with enough samples); `Ignored` is never a sample;
     /// a `429` `TripNow` trips immediately (unchanged). `retry_after` is consulted only in
     /// the `TripNow` arms, clamped to `retry_after_cap`.
-    pub(crate) fn record(&mut self, class: Class, now: Instant, retry_after: Option<Duration>) {
+    pub(crate) fn record(
+        &mut self,
+        class: Class,
+        now: Instant,
+        retry_after: Option<Duration>,
+    ) -> Option<TripReason> {
         // Hoist config reads (all `Copy`) so the `&mut self.state` match below borrows only
         // `state`, and compute the next state, applying it after the borrow ends.
         let min_calls = self.cfg.minimum_calls.get();
@@ -244,54 +274,73 @@ impl Breaker {
             }),
         );
 
-        let next: Option<BreakerState> = match &mut self.state {
+        // (next state, trip reason). Reason is Some only when entering Open.
+        let (next, reason): (Option<BreakerState>, Option<TripReason>) = match &mut self.state {
             BreakerState::Closed { window } => match class {
                 Class::Failure => {
                     window.push(Outcome::Failure);
-                    window
-                        .should_trip(min_calls, threshold)
-                        .then_some(BreakerState::Open {
-                            reopen_at: rate_reopen,
-                        })
+                    if window.should_trip(min_calls, threshold) {
+                        (
+                            Some(BreakerState::Open {
+                                reopen_at: rate_reopen,
+                            }),
+                            Some(TripReason::Rate),
+                        )
+                    } else {
+                        (None, None)
+                    }
                 },
                 Class::Success => {
                     window.push(Outcome::Success); // dilutes the rate; no reset cliff
-                    None
+                    (None, None)
                 },
-                Class::Ignored => None, // a 4xx/Auth is not a host-health sample
-                Class::TripNow => Some(BreakerState::Open {
-                    reopen_at: tripnow_reopen,
-                }),
+                Class::Ignored => (None, None), // a 4xx/Auth is not a host-health sample
+                Class::TripNow => (
+                    Some(BreakerState::Open {
+                        reopen_at: tripnow_reopen,
+                    }),
+                    Some(TripReason::Throttle),
+                ),
             },
             BreakerState::HalfOpen {
                 probes_left,
                 successes_needed,
             } => match class {
-                Class::Failure => Some(BreakerState::Open {
-                    reopen_at: rate_reopen,
-                }),
-                Class::TripNow => Some(BreakerState::Open {
-                    reopen_at: tripnow_reopen,
-                }),
+                Class::Failure => (
+                    Some(BreakerState::Open {
+                        reopen_at: rate_reopen,
+                    }),
+                    Some(TripReason::ProbeFailed),
+                ),
+                Class::TripNow => (
+                    Some(BreakerState::Open {
+                        reopen_at: tripnow_reopen,
+                    }),
+                    Some(TripReason::Throttle),
+                ),
                 // A reached-host probe (2xx/3xx or 4xx/Auth) resolves; the last one closes
                 // to a fresh window.
-                Class::Ignored | Class::Success => Some(if *successes_needed <= 1 {
-                    BreakerState::Closed {
-                        window: RateWindow::new(window_size),
-                    }
-                } else {
-                    BreakerState::HalfOpen {
-                        probes_left: *probes_left,
-                        successes_needed: *successes_needed - 1,
-                    }
-                }),
+                Class::Ignored | Class::Success => (
+                    Some(if *successes_needed <= 1 {
+                        BreakerState::Closed {
+                            window: RateWindow::new(window_size),
+                        }
+                    } else {
+                        BreakerState::HalfOpen {
+                            probes_left: *probes_left,
+                            successes_needed: *successes_needed - 1,
+                        }
+                    }),
+                    None,
+                ),
             },
             // A stale outcome from a call admitted before a concurrent trip; drop it.
-            BreakerState::Open { .. } => None,
+            BreakerState::Open { .. } => (None, None),
         };
         if let Some(state) = next {
             self.state = state;
         }
+        reason
     }
 
     /// Resolve a Half-Open probe whose call was **abandoned** (the future was
@@ -302,11 +351,14 @@ impl Breaker {
     /// cancelled call is not a host-health signal, so it must not advance the trip
     /// streak) and in `Open` (already tripped). This is what makes "every admitted
     /// probe reaches a decisive resolution" hold even under cancellation.
-    pub(crate) fn on_abandoned_probe(&mut self, now: Instant) {
+    pub(crate) fn on_abandoned_probe(&mut self, now: Instant) -> Option<TripReason> {
         if matches!(self.state, BreakerState::HalfOpen { .. }) {
             self.state = BreakerState::Open {
                 reopen_at: deadline(now, self.cfg.cooldown),
             };
+            Some(TripReason::Abandoned)
+        } else {
+            None
         }
     }
 
@@ -455,17 +507,17 @@ impl<T: Timer> Drop for ProbeGuard<'_, T> {
     fn drop(&mut self) {
         if self.armed {
             let now = self.timer.now();
-            let transition = {
+            let (transition, reason) = {
                 let mut breaker = self
                     .breaker
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner);
                 let before = breaker.phase();
-                breaker.on_abandoned_probe(now);
-                transition_label(before, breaker.phase())
+                let reason = breaker.on_abandoned_probe(now);
+                (transition_label(before, breaker.phase()), reason)
             };
             if let Some(to) = transition {
-                crate::meter::breaker_transition(to);
+                crate::meter::breaker_transition(to, reason.map(TripReason::label));
             }
         }
     }
@@ -500,7 +552,7 @@ where
                 (admit, transition_label(before, breaker.phase()))
             };
             if let Some(to) = transition {
-                crate::meter::breaker_transition(to);
+                crate::meter::breaker_transition(to, None);
             }
             let is_probe = match admit {
                 Admit::Reject => return Err(HttpError::CircuitOpen), // fast reject — leaf untouched
@@ -530,18 +582,18 @@ where
                 },
                 _ => None,
             };
-            let transition = {
+            let (transition, reason) = {
                 let now = self.timer.now();
                 let mut breaker = self
                     .breaker
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner);
                 let before = breaker.phase();
-                breaker.record(class, now, retry_after);
-                transition_label(before, breaker.phase())
+                let reason = breaker.record(class, now, retry_after);
+                (transition_label(before, breaker.phase()), reason)
             };
             if let Some(to) = transition {
-                crate::meter::breaker_transition(to);
+                crate::meter::breaker_transition(to, reason.map(TripReason::label));
             }
             if retry_after.is_some() {
                 crate::meter::retry_after_honored("breaker");
@@ -1123,9 +1175,12 @@ mod service_tests {
                 && k.key()
                     .labels()
                     .any(|l| l.key() == "to" && l.value() == "open")
+                && k.key()
+                    .labels()
+                    .any(|l| l.key() == "reason" && l.value() == "rate")
                 && matches!(v, DebugValue::Counter(n) if n >= 1)
         });
-        assert!(opened, "a trip emits a to=open transition counter");
+        assert!(opened, "a rate trip emits to=open, reason=rate");
     }
 
     #[tokio::test]

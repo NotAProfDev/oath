@@ -57,9 +57,15 @@ pub(crate) fn route_label(req: &http::Request<Bytes>) -> Cow<'static, str> {
         .map_or(Cow::Borrowed("other"), |t| t.0.clone())
 }
 
-/// Record a circuit-breaker phase transition into `to`.
-pub(crate) fn breaker_transition(to: &'static str) {
-    metrics::counter!(CIRCUIT_TRANSITIONS, "to" => to).increment(1);
+/// Record a circuit-breaker phase transition into `to`, with an optional `reason`
+/// (present only for `to = "open"`: `"rate" | "throttle" | "probe_failed" | "abandoned"`).
+pub(crate) fn breaker_transition(to: &'static str, reason: Option<&'static str>) {
+    match reason {
+        Some(reason) => {
+            metrics::counter!(CIRCUIT_TRANSITIONS, "to" => to, "reason" => reason).increment(1);
+        },
+        None => metrics::counter!(CIRCUIT_TRANSITIONS, "to" => to).increment(1),
+    }
 }
 
 /// Count one local pacing rejection for `route`.
@@ -111,28 +117,25 @@ mod tests {
     }
 
     #[test]
-    fn breaker_transition_increments_a_phase_labelled_counter() {
+    fn breaker_transition_carries_to_and_optional_reason() {
         let recorder = DebuggingRecorder::new();
         let snap = recorder.snapshotter();
         metrics::with_local_recorder(&recorder, || {
-            breaker_transition("open");
-            breaker_transition("open");
+            breaker_transition("open", Some("rate"));
+            breaker_transition("half_open", None);
         });
-        let counter = snap
-            .snapshot()
-            .into_vec()
-            .into_iter()
-            .find(|(k, _, _, _)| k.key().name() == "http_circuit_breaker_transitions_total")
-            .expect("counter emitted");
-        assert!(
-            counter
-                .0
-                .key()
-                .labels()
-                .any(|l| l.key() == "to" && l.value() == "open"),
-            "labelled to=open"
-        );
-        assert_eq!(counter.3, DebugValue::Counter(2), "two transitions counted");
+        let snapshot = snap.snapshot().into_vec();
+        let opened = snapshot.iter().any(|(k, _, _, v)| {
+            k.key().name() == "http_circuit_breaker_transitions_total"
+                && k.key()
+                    .labels()
+                    .any(|l| l.key() == "to" && l.value() == "open")
+                && k.key()
+                    .labels()
+                    .any(|l| l.key() == "reason" && l.value() == "rate")
+                && matches!(v, DebugValue::Counter(n) if *n == 1)
+        });
+        assert!(opened, "to=open carries reason=rate");
     }
 
     #[test]
