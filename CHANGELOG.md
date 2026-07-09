@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **net-api compose polish — no behaviour change.** Added `#[must_use]` to
+  `LayerBuilder::wrap()` (assembling a stack and then discarding it is a bug); added
+  unit tests locking the compose ordering invariant, `Identity` pass-through, and the
+  zero-cost (ZST) property; and made the `oath-adapter-net-api` rustdoc self-contained
+  (removed internal-ADR citations from `compose`/`lib`/`timer`).
 - **Breaking (pre-release) — net compose vocabulary.** Renamed the transport-neutral
   composition machinery in `oath-adapter-net-api` to match its `Service`-agnostic role
   (ADR-0029 §3): `ServiceBuilder` → `LayerBuilder`, the `Layer::Service` associated type

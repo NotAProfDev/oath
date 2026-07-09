@@ -1,15 +1,12 @@
 //! `oath-adapter-net-api` — transport-neutral composition primitives + contracts.
 //!
-//! This crate is **std-only** (zero deps — the signal the ADR-0029 cut is
-//! clean). It defines the shared abstractions every transport's layers depend
-//! on:
+//! This crate is **std-only** (zero dependencies — the signal that the
+//! transport-neutral cut is clean). It defines the shared abstractions every
+//! transport's layers depend on:
 //!
 //! - [`compose`] — `Layer`, `LayerBuilder`, `Identity`, `Stack`
 //! - [`error_kind`] — `ErrorKind`, `HasErrorKind`
 //! - [`timer`] — `Timer`
-//!
-//! `Service` is **not** here — it is a per-transport contract in
-//! `oath-adapter-net-http-api` (ADR-0029 §2).
 #![forbid(unsafe_code)]
 
 pub mod compose;
