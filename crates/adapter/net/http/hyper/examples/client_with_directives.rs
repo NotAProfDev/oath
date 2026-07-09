@@ -63,7 +63,9 @@ async fn main() {
             seed: 1,
         },
         circuit_breaker: CircuitBreakerConfig {
-            failure_threshold: NonZeroU32::new(3).unwrap(),
+            failure_rate_threshold: 50,
+            window_size: NonZeroU32::new(50).unwrap(),
+            minimum_calls: NonZeroU32::new(10).unwrap(),
             cooldown: Duration::from_secs(30),
             retry_after_fallback: Duration::from_secs(900),
             retry_after_cap: Duration::from_secs(1800),

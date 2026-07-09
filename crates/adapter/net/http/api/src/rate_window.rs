@@ -7,23 +7,8 @@
 //! immediately without a window sample. A recovered host earns a fresh window via
 //! [`RateWindow::new`].
 //!
-//! Not yet wired into [`crate::circuit_breaker`] — that lands in the next commit on
-//! this branch, which is why the `#[expect(dead_code, …)]` below exists.
-
-// Standalone unit, landed ahead of its call site (`Breaker::record`, next commit on
-// this branch) so it can be built and reviewed test-first in isolation. `expect` (not
-// `allow`) makes the suppression self-clearing: once `circuit_breaker.rs` consumes the
-// items in the non-test build the lint stops firing and `expect` reports itself as
-// unfulfilled, forcing its own removal in Task 2. Scoped to `not(test)` because the
-// unit tests below already exercise every item, so `dead_code` never fires in the test
-// build — an unscoped `expect` there would be unfulfilled today.
-#![cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "not yet wired into circuit_breaker.rs; removed once RateWindow/Outcome are consumed in Task 2"
-    )
-)]
+//! Wired into [`crate::circuit_breaker`]'s `Breaker::record` as the Closed-state trip
+//! policy.
 
 use std::collections::VecDeque;
 use std::num::NonZeroU32;

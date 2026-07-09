@@ -1,13 +1,14 @@
-//! The `CircuitBreaker` resilience layer (ADR-0031 §5): the reactive 429/outage
-//! backstop to `RateLimit`'s proactive pacing.
+//! The `CircuitBreaker` resilience layer (ADR-0031 §5, Amendment #3): the reactive
+//! 429/outage backstop to `RateLimit`'s proactive pacing.
 //!
 //! `RateLimit` tries never to hit a 429; `CircuitBreaker` stops cold if the host
-//! fails anyway. It trips **Open** after [`CircuitBreakerConfig::failure_threshold`]
-//! consecutive transport failures (`HttpError::{Connection, Timeout}` or a `5xx`
-//! response), or **immediately** on a venue **429 response** with the long
-//! [`CircuitBreakerConfig::retry_after_fallback`] (IBKR's ~15-minute penalty box). A
-//! `Throttled` *error* is a local pacing decision (the request was never sent) and
-//! is ignored — it never trips the breaker.
+//! fails anyway. It trips **Open** when the **failure rate** over the last
+//! [`CircuitBreakerConfig::window_size`] outcomes reaches
+//! [`CircuitBreakerConfig::failure_rate_threshold`] (once at least
+//! [`CircuitBreakerConfig::minimum_calls`] samples are present), or **immediately** on a
+//! venue **429 response** with the long [`CircuitBreakerConfig::retry_after_fallback`]
+//! (IBKR's ~15-minute penalty box). A `Throttled` *error* and a `4xx`/`Auth` are local
+//! or client-side and never enter the window.
 //! While Open it **fast-rejects** every request with a non-retryable
 //! [`HttpError::CircuitOpen`] — the inner stack is
 //! never touched. After the cooldown a bounded number of **Half-Open** probes test
@@ -22,6 +23,7 @@
 //! — `http::Response<B>` is forwarded untouched.
 
 use crate::clock::deadline;
+use crate::rate_window::{Outcome, RateWindow};
 use crate::{HttpError, Service};
 use bytes::Bytes;
 use oath_adapter_net_api::{ErrorKind, HasErrorKind, Layer, Timer};
@@ -31,25 +33,28 @@ use std::num::NonZeroU32;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-/// The circuit breaker's thresholds, as plain `Copy` data (ADR-0031 §5).
+/// The circuit breaker's thresholds, as plain `Copy` data (ADR-0031 §5, Amendment #3).
 ///
-/// `failure_threshold` and `half_open_probes` are `NonZeroU32`: "≥ 1" is a type
-/// invariant, so [`CircuitBreakerLayer::new`] needs no
-/// `Result` (a `0` threshold is nonsense and `0` probes would leave a tripped
-/// circuit stuck Open forever). This types §5's `u32` sketch more precisely.
+/// `window_size`, `minimum_calls`, and `half_open_probes` are `NonZeroU32` ("≥ 1" is a
+/// type invariant); `failure_rate_threshold` and the `minimum_calls ≤ window_size`
+/// relationship are validated at boot by `stack::validate_config`.
 #[derive(Debug, Clone, Copy)]
 pub struct CircuitBreakerConfig {
-    /// Consecutive failures in the Closed state that trip the circuit Open.
-    pub failure_threshold: NonZeroU32,
-    /// The cooldown before Half-Open probing after a failure-threshold trip.
+    /// Failure-rate percentage (`1..=100`) that trips the circuit over the rolling
+    /// window; a 50 % host trips at `50`. Validated at boot.
+    pub failure_rate_threshold: u8,
+    /// Rolling window size: the last-N outcomes the failure rate is computed over.
+    pub window_size: NonZeroU32,
+    /// Minimum window samples before the rate can trip (cold-start floor). Must be
+    /// `≤ window_size` (validated at boot).
+    pub minimum_calls: NonZeroU32,
+    /// The cooldown before Half-Open probing after a **rate** trip.
     pub cooldown: Duration,
-    /// The `429` reopen wait when the response carries **no** usable `Retry-After`
-    /// (the penalty-box fallback; ≈ 10–15 min for IBKR). Renamed for clarity
-    /// (ADR-0031 Amendment #2).
+    /// The `429` reopen wait when the response carries no usable `Retry-After`
+    /// (the penalty-box fallback; ≈ 10–15 min for IBKR) — Amendment #2.
     pub retry_after_fallback: Duration,
-    /// Ceiling on an **honored** `429` `Retry-After`: `reopen = min(retry_after, cap)`.
-    /// May be set `≥ retry_after_fallback` to honor a directive *longer* than the
-    /// default box; also bounds a hostile/absurd `Retry-After` (ADR-0031 Amendment #2).
+    /// Ceiling on an honored `429` `Retry-After`: `reopen = min(retry_after, cap)` —
+    /// Amendment #2.
     pub retry_after_cap: Duration,
     /// Probes admitted per Half-Open episode; all must reach the host to close.
     pub half_open_probes: NonZeroU32,
@@ -112,10 +117,10 @@ pub(crate) fn classify<B>(outcome: &Result<http::Response<B>, HttpError>) -> Cla
 
 /// The breaker's state (ADR-0031 §5). `Instant` deadlines are compared against
 /// `Timer::now()` by the async shell — the core itself never reads a clock.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum BreakerState {
-    /// Passing requests; `consecutive_failures` counts toward the trip threshold.
-    Closed { consecutive_failures: u32 },
+    /// Passing requests; `window` accumulates outcomes toward the rate trip.
+    Closed { window: RateWindow },
     /// Rejecting fast until `reopen_at`; then the next admit begins Half-Open.
     Open { reopen_at: Instant },
     /// Probing: `probes_left` may still be admitted, `successes_needed` must reach
@@ -180,11 +185,11 @@ pub(crate) struct Breaker {
 }
 
 impl Breaker {
-    /// A fresh breaker starts Closed with no failures.
-    pub(crate) const fn new(cfg: CircuitBreakerConfig) -> Self {
+    /// A fresh breaker starts Closed with an empty window.
+    pub(crate) fn new(cfg: CircuitBreakerConfig) -> Self {
         Self {
             state: BreakerState::Closed {
-                consecutive_failures: 0,
+                window: RateWindow::new(cfg.window_size),
             },
             cfg,
         }
@@ -219,77 +224,73 @@ impl Breaker {
         }
     }
 
-    /// Record a classified outcome, transitioning as ADR-0031 §5 dictates.
+    /// Record a classified outcome, transitioning as ADR-0031 §5 (Amendment #3) dictates.
     ///
-    /// `retry_after` is the delay-seconds value parsed from a `429` response's
-    /// `Retry-After` header (Amendment #2); it is consulted only in the
-    /// [`Class::TripNow`] arms below, clamped to `retry_after_cap`.
+    /// In Closed, `Failure`/`Success` feed the rolling window and a `Failure` trips when
+    /// the rate crosses the threshold (with enough samples); `Ignored` is never a sample;
+    /// a `429` `TripNow` trips immediately (unchanged). `retry_after` is consulted only in
+    /// the `TripNow` arms, clamped to `retry_after_cap`.
     pub(crate) fn record(&mut self, class: Class, now: Instant, retry_after: Option<Duration>) {
-        match self.state {
-            BreakerState::Closed {
-                consecutive_failures,
-            } => match class {
+        // Hoist config reads (all `Copy`) so the `&mut self.state` match below borrows only
+        // `state`, and compute the next state, applying it after the borrow ends.
+        let min_calls = self.cfg.minimum_calls.get();
+        let threshold = u32::from(self.cfg.failure_rate_threshold);
+        let window_size = self.cfg.window_size;
+        let rate_reopen = deadline(now, self.cfg.cooldown);
+        let tripnow_reopen = deadline(
+            now,
+            retry_after.map_or(self.cfg.retry_after_fallback, |ra| {
+                ra.min(self.cfg.retry_after_cap)
+            }),
+        );
+
+        let next: Option<BreakerState> = match &mut self.state {
+            BreakerState::Closed { window } => match class {
                 Class::Failure => {
-                    let n = consecutive_failures.saturating_add(1);
-                    self.state = if n >= self.cfg.failure_threshold.get() {
-                        BreakerState::Open {
-                            reopen_at: deadline(now, self.cfg.cooldown),
-                        }
-                    } else {
-                        BreakerState::Closed {
-                            consecutive_failures: n,
-                        }
-                    };
+                    window.push(Outcome::Failure);
+                    window
+                        .should_trip(min_calls, threshold)
+                        .then_some(BreakerState::Open {
+                            reopen_at: rate_reopen,
+                        })
                 },
-                Class::TripNow => {
-                    let cooldown = retry_after.map_or(self.cfg.retry_after_fallback, |ra| {
-                        ra.min(self.cfg.retry_after_cap)
-                    });
-                    self.state = BreakerState::Open {
-                        reopen_at: deadline(now, cooldown),
-                    };
-                },
-                Class::Ignored => {}, // streak untouched — a 4xx/Auth neither trips nor resets
                 Class::Success => {
-                    self.state = BreakerState::Closed {
-                        consecutive_failures: 0,
-                    };
+                    window.push(Outcome::Success); // dilutes the rate; no reset cliff
+                    None
                 },
+                Class::Ignored => None, // a 4xx/Auth is not a host-health sample
+                Class::TripNow => Some(BreakerState::Open {
+                    reopen_at: tripnow_reopen,
+                }),
             },
             BreakerState::HalfOpen {
                 probes_left,
                 successes_needed,
             } => match class {
-                Class::Failure => {
-                    self.state = BreakerState::Open {
-                        reopen_at: deadline(now, self.cfg.cooldown),
-                    };
-                },
-                Class::TripNow => {
-                    let cooldown = retry_after.map_or(self.cfg.retry_after_fallback, |ra| {
-                        ra.min(self.cfg.retry_after_cap)
-                    });
-                    self.state = BreakerState::Open {
-                        reopen_at: deadline(now, cooldown),
-                    };
-                },
-                // A reached-host probe (2xx/3xx or 4xx/Auth) resolves; the last one closes.
-                Class::Ignored | Class::Success => {
-                    self.state = if successes_needed <= 1 {
-                        BreakerState::Closed {
-                            consecutive_failures: 0,
-                        }
-                    } else {
-                        BreakerState::HalfOpen {
-                            probes_left,
-                            successes_needed: successes_needed - 1,
-                        }
-                    };
-                },
+                Class::Failure => Some(BreakerState::Open {
+                    reopen_at: rate_reopen,
+                }),
+                Class::TripNow => Some(BreakerState::Open {
+                    reopen_at: tripnow_reopen,
+                }),
+                // A reached-host probe (2xx/3xx or 4xx/Auth) resolves; the last one closes
+                // to a fresh window.
+                Class::Ignored | Class::Success => Some(if *successes_needed <= 1 {
+                    BreakerState::Closed {
+                        window: RateWindow::new(window_size),
+                    }
+                } else {
+                    BreakerState::HalfOpen {
+                        probes_left: *probes_left,
+                        successes_needed: *successes_needed - 1,
+                    }
+                }),
             },
             // A stale outcome from a call admitted before a concurrent trip; drop it.
-            // Never un-trips a freshly-opened circuit (single global v1 breaker).
-            BreakerState::Open { .. } => {},
+            BreakerState::Open { .. } => None,
+        };
+        if let Some(state) = next {
+            self.state = state;
         }
     }
 
@@ -343,7 +344,9 @@ impl<T> CircuitBreakerLayer<T> {
     /// use std::time::Duration;
     ///
     /// let cfg = CircuitBreakerConfig {
-    ///     failure_threshold: NonZeroU32::new(3).unwrap(),
+    ///     failure_rate_threshold: 50,
+    ///     window_size: NonZeroU32::new(50).unwrap(),
+    ///     minimum_calls: NonZeroU32::new(10).unwrap(),
     ///     cooldown: Duration::from_secs(30),
     ///     retry_after_fallback: Duration::from_secs(900),
     ///     retry_after_cap: Duration::from_secs(1800),
@@ -608,9 +611,17 @@ mod breaker_tests {
     use std::num::NonZeroU32;
     use std::time::{Duration, Instant};
 
-    fn cfg(threshold: u32, probes: u32) -> CircuitBreakerConfig {
+    // General rate config for policy-specific tests.
+    fn rate_cfg(
+        threshold_pct: u8,
+        window: u32,
+        min_calls: u32,
+        probes: u32,
+    ) -> CircuitBreakerConfig {
         CircuitBreakerConfig {
-            failure_threshold: NonZeroU32::new(threshold).unwrap(),
+            failure_rate_threshold: threshold_pct,
+            window_size: NonZeroU32::new(window).unwrap(),
+            minimum_calls: NonZeroU32::new(min_calls).unwrap(),
             cooldown: Duration::from_secs(30),
             retry_after_fallback: Duration::from_secs(900),
             retry_after_cap: Duration::from_secs(1800),
@@ -618,53 +629,89 @@ mod breaker_tests {
         }
     }
 
+    // A config that trips on the FIRST failure (100% over a 1-sample window) — the analogue
+    // of the old `failure_threshold = 1`, for the Open/HalfOpen/probe tests whose behavior
+    // is independent of the trip policy.
+    fn first(probes: u32) -> CircuitBreakerConfig {
+        rate_cfg(100, 1, 1, probes)
+    }
+
     #[test]
-    fn closed_trips_after_threshold_consecutive_failures() {
+    fn closed_trips_when_failure_rate_reaches_threshold() {
         let now = Instant::now();
-        let mut b = Breaker::new(cfg(3, 1));
-        assert_eq!(b.admit(now), Admit::Pass);
-        b.record(Class::Failure, now, None);
-        b.record(Class::Failure, now, None);
-        assert_eq!(b.admit(now), Admit::Pass, "still closed after 2 failures");
-        b.record(Class::Failure, now, None);
+        // 50% over a 20-window, min_calls 10.
+        let mut b = Breaker::new(rate_cfg(50, 20, 10, 1));
+        for _ in 0..5 {
+            b.record(Class::Success, now, None);
+            b.record(Class::Failure, now, None);
+        } // 5F + 5S = 10 samples, 50%
         assert_eq!(
             b.admit(now),
             Admit::Reject,
-            "3rd consecutive failure → Open rejects"
+            "50% over 10 samples meets the 50% threshold"
         );
     }
 
     #[test]
-    fn a_success_resets_the_failure_streak() {
+    fn interleaved_successes_do_not_prevent_a_rate_trip() {
+        // The motivating case: consecutive-count never tripped this; the rate window does.
         let now = Instant::now();
-        let mut b = Breaker::new(cfg(3, 1));
-        b.record(Class::Failure, now, None);
-        b.record(Class::Failure, now, None);
-        b.record(Class::Success, now, None); // reset
-        b.record(Class::Failure, now, None);
-        b.record(Class::Failure, now, None);
-        assert_eq!(b.admit(now), Admit::Pass, "streak reset → not tripped");
-    }
-
-    #[test]
-    fn ignored_does_not_reset_the_streak() {
-        let now = Instant::now();
-        let mut b = Breaker::new(cfg(3, 1));
-        b.record(Class::Failure, now, None);
-        b.record(Class::Ignored, now, None); // a 4xx does NOT reset — anti-masking
-        b.record(Class::Failure, now, None);
-        b.record(Class::Failure, now, None); // 3rd failure overall → trips
+        let mut b = Breaker::new(rate_cfg(50, 20, 10, 1));
+        for _ in 0..10 {
+            b.record(Class::Failure, now, None);
+            b.record(Class::Success, now, None); // a success no longer resets an alarm
+        }
         assert_eq!(
             b.admit(now),
             Admit::Reject,
-            "ignored left the streak intact → trips"
+            "sustained 50% degradation trips"
+        );
+    }
+
+    #[test]
+    fn below_min_calls_never_trips() {
+        let now = Instant::now();
+        let mut b = Breaker::new(rate_cfg(50, 20, 10, 1));
+        for _ in 0..9 {
+            b.record(Class::Failure, now, None); // 100% but only 9 < min 10
+        }
+        assert_eq!(b.admit(now), Admit::Pass, "under the min-calls floor");
+    }
+
+    #[test]
+    fn ignored_is_not_a_window_sample() {
+        let now = Instant::now();
+        let mut b = Breaker::new(rate_cfg(50, 20, 10, 1));
+        for _ in 0..30 {
+            b.record(Class::Ignored, now, None); // a flood of 4xx: neither trips nor counts
+        }
+        assert_eq!(b.admit(now), Admit::Pass, "4xx never enters the window");
+    }
+
+    #[test]
+    fn window_resets_to_a_clean_slate_on_close() {
+        let now = Instant::now();
+        // Trips at 2/2 failures (100% over a 2-sample window).
+        let mut b = Breaker::new(rate_cfg(100, 2, 2, 1));
+        b.record(Class::Failure, now, None); // [F] — 1 < min 2, no trip
+        b.record(Class::Failure, now, None); // [F,F] — 100% of 2 → Open
+        let after = now + Duration::from_secs(30);
+        assert_eq!(b.admit(after), Admit::Probe);
+        b.record(Class::Success, after, None); // probe closes → FRESH empty window
+        // One failure into a fresh window is 1/1 = 100% but only 1 sample < min 2 → no trip.
+        // Had the pre-trip [F,F] carried over, this failure would keep it tripping.
+        b.record(Class::Failure, after, None);
+        assert_eq!(
+            b.admit(after),
+            Admit::Pass,
+            "fresh window after close: one failure is below min_calls, so no trip"
         );
     }
 
     #[test]
     fn throttle_trips_immediately_on_the_long_cooldown() {
         let now = Instant::now();
-        let mut b = Breaker::new(cfg(3, 1));
+        let mut b = Breaker::new(first(1));
         b.record(Class::TripNow, now, None); // one throttle → Open, no threshold needed
         assert_eq!(b.admit(now), Admit::Reject);
         assert_eq!(
@@ -682,7 +729,7 @@ mod breaker_tests {
     #[test]
     fn open_rejects_until_cooldown_then_admits_one_probe() {
         let now = Instant::now();
-        let mut b = Breaker::new(cfg(1, 1)); // trips on the first failure
+        let mut b = Breaker::new(first(1)); // trips on the first failure
         b.record(Class::Failure, now, None);
         assert_eq!(b.admit(now), Admit::Reject);
         let after = now + Duration::from_secs(30);
@@ -701,7 +748,7 @@ mod breaker_tests {
     #[test]
     fn half_open_probe_success_closes() {
         let now = Instant::now();
-        let mut b = Breaker::new(cfg(1, 1));
+        let mut b = Breaker::new(first(1));
         b.record(Class::Failure, now, None);
         let after = now + Duration::from_secs(30);
         assert_eq!(b.admit(after), Admit::Probe);
@@ -712,7 +759,7 @@ mod breaker_tests {
     #[test]
     fn half_open_probe_ignored_also_closes() {
         let now = Instant::now();
-        let mut b = Breaker::new(cfg(1, 1));
+        let mut b = Breaker::new(first(1));
         b.record(Class::Failure, now, None);
         let after = now + Duration::from_secs(30);
         assert_eq!(b.admit(after), Admit::Probe);
@@ -727,7 +774,7 @@ mod breaker_tests {
     #[test]
     fn half_open_probe_failure_reopens() {
         let now = Instant::now();
-        let mut b = Breaker::new(cfg(1, 1));
+        let mut b = Breaker::new(first(1));
         b.record(Class::Failure, now, None);
         let after = now + Duration::from_secs(30);
         assert_eq!(b.admit(after), Admit::Probe);
@@ -747,7 +794,7 @@ mod breaker_tests {
         // NOT the 30s cooldown a failing probe would use. Distinguish the two: at
         // reopen+30s still Reject; only at reopen+900s does the next probe admit.
         let now = Instant::now();
-        let mut b = Breaker::new(cfg(1, 1)); // trips on the first failure
+        let mut b = Breaker::new(first(1)); // trips on the first failure
         b.record(Class::Failure, now, None); // Closed → Open (30s cooldown)
         let probe_at = now + Duration::from_secs(30);
         assert_eq!(b.admit(probe_at), Admit::Probe, "cooldown elapsed → probe");
@@ -767,7 +814,7 @@ mod breaker_tests {
     #[test]
     fn multi_probe_half_open_requires_all_to_close() {
         let now = Instant::now();
-        let mut b = Breaker::new(cfg(1, 2)); // 2 probes per episode
+        let mut b = Breaker::new(first(2)); // 2 probes per episode
         b.record(Class::Failure, now, None);
         let after = now + Duration::from_secs(30);
         assert_eq!(b.admit(after), Admit::Probe, "probe 1");
@@ -786,7 +833,7 @@ mod breaker_tests {
     #[test]
     fn abandoned_probe_reopens_half_open() {
         let now = Instant::now();
-        let mut b = Breaker::new(cfg(1, 1));
+        let mut b = Breaker::new(first(1));
         b.record(Class::Failure, now, None); // → Open
         let after = now + Duration::from_secs(30);
         assert_eq!(
@@ -810,23 +857,24 @@ mod breaker_tests {
     #[test]
     fn abandoned_probe_is_a_noop_in_closed() {
         let now = Instant::now();
-        let mut b = Breaker::new(cfg(3, 1));
-        b.record(Class::Failure, now, None); // streak = 1
-        b.record(Class::Failure, now, None); // streak = 2
-        b.on_abandoned_probe(now); // must NOT advance the streak
+        // Trip at 100% over a 3-sample window (min_calls 3).
+        let mut b = Breaker::new(rate_cfg(100, 3, 3, 1));
+        b.record(Class::Failure, now, None); // 1 sample
+        b.record(Class::Failure, now, None); // 2 samples, < min 3 → not tripped
+        b.on_abandoned_probe(now); // must NOT add a sample
         assert_eq!(
             b.admit(now),
             Admit::Pass,
-            "2 real failures < threshold 3 — abandon was a no-op"
+            "2 real failures < min_calls 3 — abandon was a no-op"
         );
-        b.record(Class::Failure, now, None); // the 3rd REAL failure trips it
+        b.record(Class::Failure, now, None); // 3rd real failure → 100% of 3 → trips
         assert_eq!(b.admit(now), Admit::Reject, "3rd real failure → tripped");
     }
 
     #[test]
     fn abandoned_probe_is_a_noop_in_open() {
         let now = Instant::now();
-        let mut b = Breaker::new(cfg(1, 1));
+        let mut b = Breaker::new(first(1));
         b.record(Class::Failure, now, None); // → Open { reopen_at: now + 30s }
         b.on_abandoned_probe(now + Duration::from_secs(5)); // must not push the deadline out
         assert_eq!(
@@ -844,7 +892,7 @@ mod breaker_tests {
     #[test]
     fn record_while_open_never_untrips() {
         let now = Instant::now();
-        let mut b = Breaker::new(cfg(1, 1));
+        let mut b = Breaker::new(first(1));
         b.record(Class::Failure, now, None); // → Open
         b.record(Class::Success, now, None); // a stale success from a pre-trip admit
         assert_eq!(
@@ -857,7 +905,7 @@ mod breaker_tests {
     #[test]
     fn admit_distinguishes_a_probe_from_a_normal_pass() {
         let now = Instant::now();
-        let mut b = Breaker::new(cfg(1, 1));
+        let mut b = Breaker::new(first(1));
         assert_eq!(
             b.admit(now),
             Admit::Pass,
@@ -875,7 +923,7 @@ mod breaker_tests {
     #[test]
     fn a_429_retry_after_reopens_on_the_honored_value() {
         let now = Instant::now();
-        let mut b = Breaker::new(cfg(1, 1)); // trips on the first outcome
+        let mut b = Breaker::new(first(1)); // trips on the first outcome
         // 429 carrying Retry-After: 2 → reopen at now+2s (honored), under the 900s
         // fallback and the 1800s cap.
         b.record(Class::TripNow, now, Some(Duration::from_secs(2)));
@@ -894,7 +942,7 @@ mod breaker_tests {
     #[test]
     fn a_429_retry_after_is_clamped_to_the_cap() {
         let now = Instant::now();
-        let mut b = Breaker::new(cfg(1, 1)); // retry_after_cap = 1800s
+        let mut b = Breaker::new(first(1)); // retry_after_cap = 1800s
         b.record(Class::TripNow, now, Some(Duration::from_secs(100_000))); // absurd
         assert_eq!(
             b.admit(now + Duration::from_secs(1799)),
@@ -911,7 +959,7 @@ mod breaker_tests {
     #[test]
     fn a_429_without_retry_after_uses_the_fallback() {
         let now = Instant::now();
-        let mut b = Breaker::new(cfg(1, 1)); // retry_after_fallback = 900s
+        let mut b = Breaker::new(first(1)); // retry_after_fallback = 900s
         b.record(Class::TripNow, now, None);
         assert_eq!(
             b.admit(now + Duration::from_secs(899)),
@@ -1012,13 +1060,15 @@ mod service_tests {
     }
 
     fn cfg(
-        threshold: u32,
+        trip_after: u32, // consecutive failures needed at 100% (window = min_calls = trip_after)
         cooldown: Duration,
         fallback: Duration,
         probes: u32,
     ) -> CircuitBreakerConfig {
         CircuitBreakerConfig {
-            failure_threshold: NonZeroU32::new(threshold).unwrap(),
+            failure_rate_threshold: 100,
+            window_size: NonZeroU32::new(trip_after).unwrap(),
+            minimum_calls: NonZeroU32::new(trip_after).unwrap(),
             cooldown,
             retry_after_fallback: fallback,
             retry_after_cap: Duration::from_secs(1800),

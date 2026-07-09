@@ -127,7 +127,9 @@ impl fmt::Debug for HttpConfig {
 ///         seed: 1,
 ///     },
 ///     circuit_breaker: CircuitBreakerConfig {
-///         failure_threshold: NonZeroU32::new(3).unwrap(),
+///         failure_rate_threshold: 50,
+///         window_size: NonZeroU32::new(50).unwrap(),
+///         minimum_calls: NonZeroU32::new(10).unwrap(),
 ///         cooldown: Duration::from_secs(30),
 ///         retry_after_fallback: Duration::from_secs(900),
 ///         retry_after_cap: Duration::from_secs(1800),
@@ -182,13 +184,15 @@ where
 /// Reject degenerate zero `Duration`s that would silently defeat the layer they
 /// configure: `timeout == 0` (every send instantly `Timeout`) and the breaker's
 /// `cooldown`/`retry_after_fallback`/`retry_after_cap == 0` (Open collapses straight
-/// back to Half-Open).
+/// back to Half-Open). Also rejects an out-of-range `failure_rate_threshold` (must be
+/// `1..=100`) and a `minimum_calls` that exceeds `window_size` (ADR-0031 Amendment #3).
 ///
 /// `rate_limit_max_wait` and the retry backoff (`base`/`cap`) may legitimately be
 /// zero (throttle-immediately / no-backoff), so they are **not** checked.
 ///
 /// # Errors
-/// [`BuildError::ZeroDuration`] naming the first offending field.
+/// [`BuildError::ZeroDuration`] naming the first offending field,
+/// [`BuildError::RateThresholdRange`], or [`BuildError::MinCallsExceedWindow`].
 const fn validate_config(cfg: &HttpConfig) -> Result<(), BuildError> {
     if cfg.timeout.is_zero() {
         return Err(BuildError::ZeroDuration("timeout"));
@@ -203,6 +207,19 @@ const fn validate_config(cfg: &HttpConfig) -> Result<(), BuildError> {
     }
     if cfg.circuit_breaker.retry_after_cap.is_zero() {
         return Err(BuildError::ZeroDuration("circuit_breaker.retry_after_cap"));
+    }
+    if cfg.circuit_breaker.failure_rate_threshold == 0
+        || cfg.circuit_breaker.failure_rate_threshold > 100
+    {
+        return Err(BuildError::RateThresholdRange(
+            cfg.circuit_breaker.failure_rate_threshold,
+        ));
+    }
+    if cfg.circuit_breaker.minimum_calls.get() > cfg.circuit_breaker.window_size.get() {
+        return Err(BuildError::MinCallsExceedWindow(
+            cfg.circuit_breaker.minimum_calls.get(),
+            cfg.circuit_breaker.window_size.get(),
+        ));
     }
     Ok(())
 }
@@ -384,8 +401,16 @@ mod tests {
                 cap: Duration::ZERO,
                 seed: 1,
             },
+            // 100% over a 3-sample window, min_calls 3: trips on the 3rd consecutive
+            // `Class::Failure` record — the rate-policy analogue of the old
+            // `failure_threshold: NonZeroU32::new(3)`, preserving
+            // `circuit_opens_and_fast_rejects_without_touching_the_leaf`'s "3 straight
+            // failures trip" assertion below (the CircuitBreaker sits outside Retry, so it
+            // records one outcome per top-level `svc.call`, not per retry attempt).
             circuit_breaker: CircuitBreakerConfig {
-                failure_threshold: NonZeroU32::new(3).unwrap(),
+                failure_rate_threshold: 100,
+                window_size: NonZeroU32::new(3).unwrap(),
+                minimum_calls: NonZeroU32::new(3).unwrap(),
                 cooldown: Duration::from_secs(30),
                 retry_after_fallback: Duration::from_secs(900),
                 retry_after_cap: Duration::from_secs(1800),
@@ -535,6 +560,43 @@ mod tests {
         assert_eq!(
             err,
             BuildError::ZeroDuration("circuit_breaker.retry_after_cap")
+        );
+    }
+
+    #[test]
+    fn rejects_a_zero_failure_rate_threshold() {
+        let timer = MockTimer::new();
+        let leaf = ScriptLeaf::new(timer.clone(), vec![Step::Status(200)]);
+        let mut cfg = http_cfg(1, Duration::from_secs(1), Duration::ZERO);
+        cfg.circuit_breaker.failure_rate_threshold = 0;
+        assert_eq!(
+            stack(leaf, cfg, timer, NoAuth, rate_cfg()).err(),
+            Some(BuildError::RateThresholdRange(0)),
+        );
+    }
+
+    #[test]
+    fn rejects_an_over_100_failure_rate_threshold() {
+        let timer = MockTimer::new();
+        let leaf = ScriptLeaf::new(timer.clone(), vec![Step::Status(200)]);
+        let mut cfg = http_cfg(1, Duration::from_secs(1), Duration::ZERO);
+        cfg.circuit_breaker.failure_rate_threshold = 101;
+        assert_eq!(
+            stack(leaf, cfg, timer, NoAuth, rate_cfg()).err(),
+            Some(BuildError::RateThresholdRange(101)),
+        );
+    }
+
+    #[test]
+    fn rejects_min_calls_greater_than_window() {
+        let timer = MockTimer::new();
+        let leaf = ScriptLeaf::new(timer.clone(), vec![Step::Status(200)]);
+        let mut cfg = http_cfg(1, Duration::from_secs(1), Duration::ZERO);
+        cfg.circuit_breaker.window_size = NonZeroU32::new(10).unwrap();
+        cfg.circuit_breaker.minimum_calls = NonZeroU32::new(11).unwrap();
+        assert_eq!(
+            stack(leaf, cfg, timer, NoAuth, rate_cfg()).err(),
+            Some(BuildError::MinCallsExceedWindow(11, 10)),
         );
     }
 
@@ -809,15 +871,15 @@ mod tests {
 
     // 6. C1 regression — a purely LOCAL pacing rejection (a `Throttled` error, the
     //    request never sent) must NEVER trip the venue-wide breaker. Fire more local
-    //    throttles than failure_threshold, then a well-formed request must still
-    //    reach the leaf (breaker stayed Closed), not be fast-rejected as CircuitOpen.
+    //    throttles than the breaker's minimum_calls, then a well-formed request must
+    //    still reach the leaf (breaker stayed Closed), not be fast-rejected as CircuitOpen.
     #[tokio::test]
     async fn repeated_local_throttle_never_opens_the_breaker() {
         let timer = MockTimer::new();
         let leaf = ScriptLeaf::new(timer.clone(), vec![Step::Status(200)]);
         let svc = stack(
             leaf.clone(),
-            http_cfg(1, Duration::from_secs(30), Duration::ZERO), // failure_threshold = 3
+            http_cfg(1, Duration::from_secs(30), Duration::ZERO), // window=min_calls=3
             timer,
             NoAuth,
             rate_cfg(),
