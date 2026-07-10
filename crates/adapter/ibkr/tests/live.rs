@@ -17,8 +17,17 @@ use oath_adapter_ibkr::cpapi::{AuthStatus, decode};
 fn live_auth_status_deserializes() {
     let base = std::env::var("IBKR_GATEWAY")
         .unwrap_or_else(|_| "https://localhost:5000/v1/api".to_owned());
+    // -f: fail on HTTP 4xx/5xx; -k: skip TLS verify (the gateway ships a self-signed cert);
+    // --max-time: fail fast instead of hanging on a stalled/partially-reachable gateway.
     let output = Command::new("curl")
-        .args(["-fksS", "-X", "GET", &format!("{base}/iserver/auth/status")])
+        .args([
+            "-fksS",
+            "--max-time",
+            "30",
+            "-X",
+            "GET",
+            &format!("{base}/iserver/auth/status"),
+        ])
         .output()
         .expect("curl should run");
     assert!(output.status.success(), "curl failed: {output:?}");

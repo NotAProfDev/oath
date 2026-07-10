@@ -12,9 +12,11 @@ ACCOUNT="${1:-${IBKR_ACCOUNT:-}}"
 mkdir -p "$OUT"
 
 # -f: abort on HTTP 4xx/5xx so an unauthenticated/expired session can't be silently written as a fixture.
+# -k: the local gateway ships a self-signed TLS cert, so skip verification (dev-only; use --cacert if IBKR ships a CA).
+# --max-time: fail fast instead of hanging if the gateway stalls or is only partially reachable.
 fetch() {
   # $1 = method, $2 = path (relative to BASE), $3 = output filename
-  curl -fksS -X "$1" "$BASE$2" -o "$OUT/$3"
+  curl -fksS --max-time 30 -X "$1" "$BASE$2" -o "$OUT/$3"
   echo "captured $3"
 }
 
@@ -29,7 +31,7 @@ else
   echo "skipping positions.json: pass an account id (arg 1 or IBKR_ACCOUNT)"
 fi
 
-curl -fksS -X POST "$BASE/iserver/secdef/search" \
+curl -fksS --max-time 30 -X POST "$BASE/iserver/secdef/search" \
   -H 'Content-Type: application/json' \
   -d '{"symbol":"AAPL","name":false,"secType":"STK"}' \
   -o "$OUT/secdef_search.json"
