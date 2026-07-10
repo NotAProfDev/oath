@@ -6,8 +6,10 @@ pub mod auth;
 pub mod endpoint;
 pub mod error;
 pub mod portfolio;
+pub mod secdef;
 
 pub use auth::{AuthStatus, ServerInfo, TickleIServer, TickleResponse};
 pub use endpoint::{Endpoint, Method};
 pub use error::{CpapiError, WireError, decode};
 pub use portfolio::{IServerAccounts, PortfolioAccount, Position};
+pub use secdef::{SecdefInfo, SecdefSearchEntry, SecdefSection};
