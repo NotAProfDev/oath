@@ -34,6 +34,9 @@ pub enum HttpError {
     /// The circuit breaker is open — the request was rejected without being sent.
     #[error("circuit open: request rejected without being sent")]
     CircuitOpen,
+    /// A response body exceeded the configured maximum buffered size.
+    #[error("response body exceeded the configured maximum")]
+    BodyTooLarge,
 }
 
 impl HttpError {
@@ -65,6 +68,7 @@ impl HasErrorKind for HttpError {
             Self::Auth(_) => ErrorKind::Auth,
             Self::Other(_) => ErrorKind::Unknown,
             Self::CircuitOpen => ErrorKind::CircuitOpen,
+            Self::BodyTooLarge => ErrorKind::BodyTooLarge,
         }
     }
 }
@@ -82,6 +86,7 @@ mod tests {
         assert_eq!(HttpError::auth("expired").kind(), ErrorKind::Auth);
         assert_eq!(HttpError::other("boom").kind(), ErrorKind::Unknown);
         assert_eq!(HttpError::CircuitOpen.kind(), ErrorKind::CircuitOpen);
+        assert_eq!(HttpError::BodyTooLarge.kind(), ErrorKind::BodyTooLarge);
     }
 
     #[test]

@@ -37,6 +37,7 @@ pub(crate) const fn kind_label(kind: ErrorKind) -> &'static str {
         ErrorKind::Client => "client",
         ErrorKind::Server => "server",
         ErrorKind::CircuitOpen => "circuit_open",
+        ErrorKind::BodyTooLarge => "body_too_large",
         _ => "unknown", // ErrorKind::Unknown and any future non_exhaustive variant
     }
 }
@@ -613,6 +614,14 @@ mod tests {
         assert_eq!(
             super::kind_label(oath_adapter_net_api::ErrorKind::CircuitOpen),
             "circuit_open"
+        );
+    }
+
+    #[test]
+    fn body_too_large_has_a_stable_label() {
+        assert_eq!(
+            super::kind_label(oath_adapter_net_api::ErrorKind::BodyTooLarge),
+            "body_too_large"
         );
     }
 }
