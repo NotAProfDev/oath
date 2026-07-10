@@ -41,6 +41,7 @@ use std::fmt;
 ///     circuit_breaker: CircuitBreakerConfig { failure_rate_threshold: 50, window_size: NonZeroU32::new(50).unwrap(), minimum_calls: NonZeroU32::new(10).unwrap(), cooldown: Duration::from_secs(30), retry_after_fallback: Duration::from_secs(900), retry_after_cap: Duration::from_secs(1800), half_open_probes: NonZeroU32::new(1).unwrap() },
 ///     headers: http::HeaderMap::new(),
 ///     rate_limit_max_wait: Duration::from_secs(0),
+///     body_stall_timeout: Some(Duration::from_secs(30)),
 /// };
 /// let rates = RateLimitConfig {
 ///     global: LimitPolicy::TokenBucket { rate: 1000, per: Duration::from_secs(1), burst: 1000 },
@@ -135,6 +136,7 @@ mod tests {
             },
             headers: http::HeaderMap::new(),
             rate_limit_max_wait: Duration::ZERO,
+            body_stall_timeout: Some(Duration::from_secs(30)),
         }
     }
 

@@ -73,6 +73,7 @@ async fn main() {
         },
         headers: http::HeaderMap::new(),
         rate_limit_max_wait: Duration::from_secs(0),
+        body_stall_timeout: Some(Duration::from_secs(30)),
     };
     let rates = RateLimitConfig {
         global: LimitPolicy::TokenBucket {
