@@ -586,4 +586,103 @@ mod tests {
         let ended = LimitedBody::new(Stub { remaining: 0 }, 10);
         assert!(ended.is_end_stream()); // forwarded
     }
+
+    /// Inner body reporting a RANGE size hint (`lower != upper`), unlike
+    /// `Stub`'s exact hint — needed to exercise `LimitedBody::size_hint`'s
+    /// `lower < remaining` branches, which an exact hint can never reach.
+    struct RangeHint {
+        lower: u64,
+        upper: Option<u64>,
+    }
+
+    impl Body for RangeHint {
+        type Data = Bytes;
+        type Error = HttpError;
+        fn poll_frame(
+            self: Pin<&mut Self>,
+            _: &mut Context<'_>,
+        ) -> Poll<Option<Result<Frame<Bytes>, HttpError>>> {
+            Poll::Ready(None)
+        }
+        fn size_hint(&self) -> SizeHint {
+            let mut hint = SizeHint::default();
+            hint.set_lower(self.lower);
+            if let Some(upper) = self.upper {
+                hint.set_upper(upper);
+            }
+            hint
+        }
+    }
+
+    #[test]
+    fn limited_body_clamps_size_hint_upper_when_bounded_above_cap() {
+        // inner lower(2) < cap(10) and inner upper(50) > cap: the
+        // `lower < remaining` branch with `Some(max)` must clamp upper to
+        // `remaining.min(max)` == 10, not leave it at the inner's 50.
+        let wrapped = LimitedBody::new(
+            RangeHint {
+                lower: 2,
+                upper: Some(50),
+            },
+            10,
+        );
+        let hint = wrapped.size_hint();
+        assert_eq!(hint.upper(), Some(10));
+        assert!(hint.lower() <= 10);
+    }
+
+    #[test]
+    fn limited_body_clamps_size_hint_upper_when_inner_unbounded() {
+        // inner lower(2) < cap(10) and inner upper is `None` (unbounded): the
+        // final `else` branch must set upper to `remaining` == 10, not leave
+        // it unbounded.
+        let wrapped = LimitedBody::new(
+            RangeHint {
+                lower: 2,
+                upper: None,
+            },
+            10,
+        );
+        assert_eq!(wrapped.size_hint().upper(), Some(10));
+    }
+
+    /// Yields a trailers frame (no `data_ref()`), then ends. Used to prove
+    /// `LimitedBody` only counts DATA-frame bytes toward `remaining` — a
+    /// trailers frame must pass through without consuming budget or erroring.
+    struct TrailersOnly {
+        sent: bool,
+    }
+
+    impl Body for TrailersOnly {
+        type Data = Bytes;
+        type Error = HttpError;
+        fn poll_frame(
+            self: Pin<&mut Self>,
+            _: &mut Context<'_>,
+        ) -> Poll<Option<Result<Frame<Bytes>, HttpError>>> {
+            let this = self.get_mut();
+            if this.sent {
+                Poll::Ready(None)
+            } else {
+                this.sent = true;
+                Poll::Ready(Some(Ok(Frame::trailers(http::HeaderMap::new()))))
+            }
+        }
+        fn is_end_stream(&self) -> bool {
+            self.sent
+        }
+        fn size_hint(&self) -> SizeHint {
+            SizeHint::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn limited_body_does_not_count_trailers_toward_cap() {
+        // cap 0: if the trailers' bytes were (wrongly) counted, any nonzero
+        // count would overflow a zero cap and this would error. A tiny cap
+        // with a non-DATA-only frame is the sharpest regression trap.
+        let body = LimitedBody::new(TrailersOnly { sent: false }, 0);
+        let collected = body.collect().await.expect("trailers must not error");
+        assert!(collected.trailers().is_some());
+    }
 }
