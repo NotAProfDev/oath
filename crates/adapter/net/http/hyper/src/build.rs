@@ -56,6 +56,7 @@ use std::fmt;
 ///     http2_keep_alive_interval: None,
 ///     http2_keep_alive_timeout: Duration::from_secs(10),
 ///     http2_keep_alive_while_idle: false,
+///     max_response_bytes: Some(16 * 1024 * 1024),
 /// };
 /// let _client = build(cfg, TokioTimer, NoAuth, rates, conn).expect("valid config");
 /// ```
@@ -113,6 +114,7 @@ mod tests {
             http2_keep_alive_interval: None,
             http2_keep_alive_timeout: Duration::from_secs(10),
             http2_keep_alive_while_idle: false,
+            max_response_bytes: Some(16 * 1024 * 1024),
         }
     }
 
