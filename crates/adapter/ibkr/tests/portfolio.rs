@@ -19,3 +19,17 @@ fn portfolio_accounts_deserializes() {
     assert_eq!(first.id, "DU0000000");
     assert_eq!(first.account_type.as_deref(), Some("DEMO"));
 }
+
+#[test]
+fn positions_deserialize_conid_as_int_and_money_as_number() {
+    use oath_adapter_ibkr::cpapi::Position;
+    let positions: Vec<Position> =
+        decode(include_bytes!("fixtures/cpapi/positions.json")).expect("positions decode");
+    let p = positions.first().expect("one position");
+    assert_eq!(p.conid, 265_598);
+    // Money stays a serde_json::Number — faithful to the wire, no premature f64.
+    assert_eq!(
+        p.mkt_price.as_ref().map(ToString::to_string).as_deref(),
+        Some("150.25")
+    );
+}

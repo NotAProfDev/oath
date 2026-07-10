@@ -10,4 +10,4 @@ pub mod portfolio;
 pub use auth::{AuthStatus, ServerInfo, TickleIServer, TickleResponse};
 pub use endpoint::{Endpoint, Method};
 pub use error::{CpapiError, WireError, decode};
-pub use portfolio::{IServerAccounts, PortfolioAccount};
+pub use portfolio::{IServerAccounts, PortfolioAccount, Position};
