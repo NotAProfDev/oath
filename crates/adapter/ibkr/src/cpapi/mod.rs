@@ -3,5 +3,7 @@
 //! no OATH-domain translation.
 
 pub mod endpoint;
+pub mod error;
 
 pub use endpoint::{Endpoint, Method};
+pub use error::{CpapiError, WireError, decode};
