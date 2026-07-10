@@ -94,6 +94,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`oath-adapter-ibkr` (new crate) — IBKR Client Portal API v1 read-path wire layer.**
+  Transport-agnostic serde DTOs for the CP API v1 read endpoints (`iserver/auth/status`,
+  `tickle`, `iserver/accounts`, `portfolio/accounts`, `portfolio/{acct}/positions`,
+  `iserver/secdef/search` / `info`), an `Endpoint` descriptor, and a `decode` entry point.
+  Depends only on `serde`/`serde_json`/`thiserror`; no OATH-domain translation yet
+  (deferred until `InstrumentId`/`Order` land, per ADR-0003/0025/0026). Ships a
+  hand-rolled Client Portal Gateway container (`docker/cpapi/`) and a `just ibkr-capture`
+  recipe for paper-account fixtures. Web API (beta OAuth 2.0) and TWS (socket) are future
+  sibling modules.
 - **net-http operability.** `HyperLeaf::shutdown()` drains in-flight requests
   (`await`s until an `Arc`-shared in-flight count reaches zero) so pooled
   connections can be dropped without `RST`ing an in-flight order submission; it
