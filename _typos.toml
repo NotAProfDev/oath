@@ -23,5 +23,8 @@ ssodh = "ssodh"
 acct = "acct"
 mkt = "mkt"
 hmds = "hmds"
+# IBKR misspells "collision" as "collission" on the tickle response wire; we bind
+# the wire key verbatim (see crates/adapter/ibkr/src/cpapi/auth.rs), so allow it.
+collission = "collission"
 # The CP gateway's shipped keystore filename (Vert.x, the Java web framework).
 vertx = "vertx"

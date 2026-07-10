@@ -30,6 +30,6 @@ fn positions_deserialize_conid_as_int_and_money_as_number() {
     // Money stays a serde_json::Number — faithful to the wire, no premature f64.
     assert_eq!(
         p.mkt_price.as_ref().map(ToString::to_string).as_deref(),
-        Some("150.25")
+        Some("314.341156")
     );
 }

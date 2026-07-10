@@ -45,8 +45,10 @@ fn secdef_search_is_a_post_to_iserver_secdef_search() {
 }
 
 #[test]
-fn secdef_info_path_interpolates_conid_and_sec_type() {
-    let ep = Endpoint::secdef_info(265_598, "STK");
+fn secdef_info_path_interpolates_conid_only() {
+    // A live paper gateway rejects `secType=STK` on this endpoint with
+    // 400 "month required"; a stock lookup passes `conid` alone.
+    let ep = Endpoint::secdef_info(265_598);
     assert_eq!(ep.method, Method::Get);
-    assert_eq!(ep.path, "/iserver/secdef/info?conid=265598&secType=STK");
+    assert_eq!(ep.path, "/iserver/secdef/info?conid=265598");
 }

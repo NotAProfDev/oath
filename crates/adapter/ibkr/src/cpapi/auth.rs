@@ -53,8 +53,10 @@ pub struct TickleResponse {
     /// milliseconds), when present.
     #[serde(rename = "ssoExpires")]
     pub sso_expires: Option<i64>,
-    /// `true` when a session collision occurred.
-    #[serde(default)]
+    /// `true` when a session collision occurred. IBKR misspells the wire key as
+    /// `collission` (verified against a live paper gateway); bind that exact key,
+    /// while still accepting the correctly-spelled key if IBKR ever fixes it.
+    #[serde(rename = "collission", alias = "collision", default)]
     pub collision: bool,
     /// Numeric user id, when present.
     #[serde(rename = "userId")]
