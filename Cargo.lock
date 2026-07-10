@@ -549,6 +549,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "oath-adapter-ibkr"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "oath-adapter-net-api"
 version = "0.1.0"
 

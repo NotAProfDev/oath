@@ -87,9 +87,16 @@ gitleaks:
 actionlint:
     actionlint
 
-# Lint shell scripts: git hooks and devcontainer provisioning.
+# Lint shell scripts: git hooks, devcontainer provisioning, and the IBKR capture harness.
 shellcheck:
-    shellcheck .githooks/* .devcontainer/*.sh
+    shellcheck .githooks/* .devcontainer/*.sh docker/cpapi/*.sh
+
+# ── IBKR fixture capture ──────────────────────────────────────────────────────
+
+# Capture Client Portal API v1 read-path fixtures from a running, authenticated
+# gateway (see docker/cpapi/README.md). Pass a paper account id.
+ibkr-capture account="":
+    docker/cpapi/capture.sh {{account}}
 
 # ── Supply chain & docs ───────────────────────────────────────────────────────
 
