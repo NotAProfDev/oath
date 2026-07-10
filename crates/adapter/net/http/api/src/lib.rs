@@ -45,6 +45,7 @@ pub mod retry;
 mod retry_after;
 pub mod service;
 pub mod stack;
+pub mod stall;
 pub mod timeout;
 pub mod trace;
 
@@ -62,5 +63,6 @@ pub use rate_limit::{RateLimit, RateLimitLayer, RateScope};
 pub use retry::{Retry, RetryConfig, RetryLayer, Retryable};
 pub use service::Service;
 pub use stack::{HttpConfig, stack};
+pub use stall::{StallTimeout, StallTimeoutLayer, TimeoutBody};
 pub use timeout::{RequestTimeout, Timeout, TimeoutLayer};
 pub use trace::{Tracing, TracingLayer};
