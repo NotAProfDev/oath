@@ -15,6 +15,11 @@ pub enum Method {
 
 /// A Client Portal API v1 endpoint: an HTTP [`Method`] and a path relative to the
 /// `/v1/api` base (for example `/portfolio/accounts`).
+///
+/// This descriptor models the HTTP method and the path — including any query
+/// string — only. Request **bodies** (for example the `secdef_search` search
+/// payload `{symbol, secType}`) are supplied by the future request/transport
+/// binding and are not modeled in this read-path slice.
 #[derive(Debug, Clone)]
 pub struct Endpoint {
     /// The HTTP method.
@@ -80,11 +85,12 @@ impl Endpoint {
     }
 
     /// `GET /iserver/secdef/info` — contract details (call after `secdef_search`).
+    /// `conid` and `sec_type` are required query params.
     #[must_use]
-    pub fn secdef_info() -> Self {
+    pub fn secdef_info(conid: i64, sec_type: &str) -> Self {
         Self {
             method: Method::Get,
-            path: "/iserver/secdef/info".to_owned(),
+            path: format!("/iserver/secdef/info?conid={conid}&secType={sec_type}"),
         }
     }
 }

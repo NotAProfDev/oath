@@ -2,6 +2,8 @@
 # Capture Client Portal API v1 read-path responses from a running, authenticated
 # gateway into the crate fixture directory. Log in first at https://localhost:5000.
 # Usage: docker/cpapi/capture.sh [ACCOUNT_ID]   (or set IBKR_ACCOUNT)
+# Must be run from the repo root — OUT below is repo-root-relative. `just ibkr-capture`
+# already does this.
 set -euo pipefail
 
 BASE="${IBKR_GATEWAY:-https://localhost:5000/v1/api}"

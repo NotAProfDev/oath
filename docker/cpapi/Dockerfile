@@ -3,12 +3,14 @@
 FROM eclipse-temurin:21-jre
 
 RUN apt-get update \
- && apt-get install -y --no-install-recommends unzip curl ca-certificates \
+ && apt-get install -y --no-install-recommends unzip ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt/clientportal
 
 # Download + unpack the gateway distribution (extracts bin/, root/, dist/, ...).
+# Unpinned: fetched over HTTPS from IBKR's official domain; IBKR ships no
+# versioned/checksummed artifact, and this dev-only harness is never built in CI.
 ADD https://download2.interactivebrokers.com/portal/clientportal.gw.zip clientportal.gw.zip
 RUN unzip -q clientportal.gw.zip && rm clientportal.gw.zip
 

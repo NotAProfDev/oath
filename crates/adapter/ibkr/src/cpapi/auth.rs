@@ -49,7 +49,8 @@ pub struct TickleIServer {
 pub struct TickleResponse {
     /// Opaque session token.
     pub session: String,
-    /// SSO expiry, in seconds, when present.
+    /// SSO session expiry countdown — raw wire value (IBKR reports this in
+    /// milliseconds), when present.
     #[serde(rename = "ssoExpires")]
     pub sso_expires: Option<i64>,
     /// `true` when a session collision occurred.
