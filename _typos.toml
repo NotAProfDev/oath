@@ -23,3 +23,5 @@ ssodh = "ssodh"
 acct = "acct"
 mkt = "mkt"
 hmds = "hmds"
+# The CP gateway's shipped keystore filename (Vert.x, the Java web framework).
+vertx = "vertx"

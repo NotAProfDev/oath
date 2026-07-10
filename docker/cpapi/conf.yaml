@@ -1,0 +1,55 @@
+# IBKR Client Portal Gateway config — DEVELOPMENT ONLY (baked into the image).
+#
+# Fully replaces the distribution's shipped root/conf.yaml. The shipped file's
+# `ips.allow` only permits 192.*/131.216.*/127.0.0.1, so a browser login forwarded
+# through Docker (source 172.*/10.*) is rejected "403 / not allowed". The allowlist
+# below covers loopback + RFC-1918 private ranges. This gateway is for
+# localhost/devcontainer use only — never expose it on a public network.
+
+# ── Listener ──────────────────────────────────────────────────────────────────
+listenPort: 5000
+listenSsl: true
+sslCert: "vertx.jks"          # the distribution's shipped self-signed keystore
+sslPwd: "mywebapi"            # its shipped password (public; dev-only)
+
+# ── Upstream proxy ────────────────────────────────────────────────────────────
+proxyRemoteSsl: true
+proxyRemoteHost: "https://api.ibkr.com"
+
+# ── Authentication ────────────────────────────────────────────────────────────
+ip2loc: "DE"                  # geo hint for the login page (ISO 3166-1 alpha-2)
+authDelay: 3000
+
+# ── General ───────────────────────────────────────────────────────────────────
+svcEnvironment: "v1"
+portalBaseURL: ""
+ccp: false
+
+# ── Vert.x tuning (modest, single-developer workload) ─────────────────────────
+serverOptions:
+    blockedThreadCheckInterval: 1000000
+    eventLoopPoolSize: 4
+    workerPoolSize: 8
+    maxWorkerExecuteTime: 100
+    internalBlockingPoolSize: 8
+
+# ── Access control ────────────────────────────────────────────────────────────
+cors:
+    origin.allowed: "*"
+    allowCredentials: false
+
+# IP allowlist — loopback + RFC-1918 private ranges (covers Docker bridge networks
+# and localhost port-forwarding); everything else is denied.
+ips:
+    allow:
+        - "127.0.0.1"
+        - "10.*"
+        - "172.*"
+        - "192.168.*"
+    deny:
+        - "0.0.0.0/0"
+
+# ── Web apps ──────────────────────────────────────────────────────────────────
+webApps:
+    - name: "demo"
+      index: "index.html"

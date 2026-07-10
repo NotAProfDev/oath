@@ -16,17 +16,19 @@ docker compose -f docker/cpapi/docker-compose.yml up -d --build
 # and log in with your PAPER credentials. Leave the tab; the session lives here.
 ```
 The brokerage session times out after ~5 min idle; `/tickle` keeps it alive.
-If the login page rejects you (403 / "not allowed"), the shipped `root/conf.yaml`
-`ips.allow` is too strict for container networking — see the commented bind-mount in
-`docker-compose.yml`.
+The image bakes a dev [`conf.yaml`](conf.yaml) whose `ips.allow` covers loopback +
+RFC-1918 private ranges, so a browser login forwarded through Docker is **not**
+rejected 403. `docker ps` shows the container `healthy` once the gateway is serving
+(a `HEALTHCHECK` polls `/iserver/auth/status`).
 
 ## Capture fixtures
 ```bash
 just ibkr-capture DU0000000     # your paper account id
 ```
-This writes raw JSON to `crates/adapter/ibkr/tests/fixtures/cpapi/`.
-If the script aborts on an endpoint, the brokerage session likely isn't
-authenticated — log in at https://localhost:5000 and re-run.
+This writes raw JSON to `crates/adapter/ibkr/tests/fixtures/cpapi/`. The recipe
+resolves the gateway's container IP (localhost:5000 is not routable from inside a
+devcontainer). If the script aborts on an endpoint, the brokerage session likely
+isn't authenticated — log in at https://localhost:5000 and re-run.
 
 ## Sanitize before committing (required)
 The responses come from a real paper account. Before `git add`:
