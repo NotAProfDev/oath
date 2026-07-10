@@ -84,13 +84,16 @@ impl Endpoint {
         }
     }
 
-    /// `GET /iserver/secdef/info` — contract details (call after `secdef_search`).
-    /// `conid` and `sec_type` are required query params.
+    /// `GET /iserver/secdef/info?conid={conid}` — contract details for a stock
+    /// (call after `secdef_search`). Only `conid` is sent: a live paper gateway
+    /// rejects `secType=STK` here with `400 "month required"`, because the `secType`
+    /// path is for options/futures (which additionally need `month`/`strike`/`right`
+    /// — a future slice).
     #[must_use]
-    pub fn secdef_info(conid: i64, sec_type: &str) -> Self {
+    pub fn secdef_info(conid: i64) -> Self {
         Self {
             method: Method::Get,
-            path: format!("/iserver/secdef/info?conid={conid}&secType={sec_type}"),
+            path: format!("/iserver/secdef/info?conid={conid}"),
         }
     }
 }

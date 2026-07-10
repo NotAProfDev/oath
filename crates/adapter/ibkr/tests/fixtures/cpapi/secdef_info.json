@@ -1,1 +1,1 @@
-[{"conid":265598,"symbol":"AAPL","secType":"STK","exchange":"NASDAQ","currency":"USD","companyName":"APPLE INC"}]
+{"conid":265598,"ticker":"AAPL","secType":"STK","listingExchange":"NASDAQ.NMS","exchange":"SMART","companyName":"APPLE INC","currency":"USD","validExchanges":"SMART,AMEX,NYSE,CBOE,PHLX,ISE,CHX,ARCA,NASDAQ,DRCTEDGE,BEX,BATS,EDGEA,BYX,IEX,EDGX,FOXRIVER,PEARL,NYSENAT,LTSE,MEMX,IBEOS,OVERNIGHT,TPLUS0,PSX,T24X","priceRendering":null,"maturityDate":null,"right":"?","strike":0.0}

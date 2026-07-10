@@ -41,8 +41,11 @@ pub struct SecdefSearchEntry {
 pub struct SecdefInfo {
     /// IBKR contract id (an integer on this endpoint).
     pub conid: i64,
-    /// Symbol, when present.
-    pub symbol: Option<String>,
+    /// Ticker symbol. IBKR names this field `ticker` on `secdef/info` (contrast the
+    /// `symbol` key on `secdef/search`); verified against a live paper gateway. The
+    /// `symbol` alias is accepted defensively.
+    #[serde(rename = "ticker", alias = "symbol")]
+    pub ticker: Option<String>,
     /// Security type, when present.
     #[serde(rename = "secType")]
     pub sec_type: Option<String>,

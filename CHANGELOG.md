@@ -109,6 +109,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   hand-rolled Client Portal Gateway container (`docker/cpapi/`) and a `just ibkr-capture`
   recipe for paper-account fixtures. Web API (beta OAuth 2.0) and TWS (socket) are future
   sibling modules.
+- **`oath-adapter-ibkr` — real paper-gateway fixtures + live-wire reconciliation.**
+  Replaced the representative CP API v1 fixtures with **real, sanitized** captures from a
+  live paper Client Portal Gateway, reconciling the DTOs, endpoint descriptor, and capture
+  script to what the wire actually sends: `tickle` binds IBKR's misspelled `collission`
+  key; `secdef/info` binds `ticker` (not `symbol`) and returns a single object for one
+  `conid`; `Endpoint::secdef_info` is now `conid`-only (a stock lookup with `secType=STK`
+  yields `400 "month required"`); and `capture.sh` sends an empty-body `POST /tickle`
+  (a bodyless POST returns `411 Length Required`).
 - **net-http operability.** `HyperLeaf::shutdown()` drains in-flight requests
   (`await`s until an `Arc`-shared in-flight count reaches zero) so pooled
   connections can be dropped without `RST`ing an in-flight order submission; it
