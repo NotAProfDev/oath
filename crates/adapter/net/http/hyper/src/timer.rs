@@ -1,7 +1,6 @@
 //! [`TokioTimer`] — the tokio-backed [`Timer`] the resilience stack sleeps on.
 
 use oath_adapter_net_api::Timer;
-use std::future::Future;
 use std::time::{Duration, Instant};
 
 /// The tokio-backed [`Timer`]: [`sleep`](Timer::sleep) and [`now`](Timer::now)
@@ -13,7 +12,8 @@ use std::time::{Duration, Instant};
 pub struct TokioTimer;
 
 impl Timer for TokioTimer {
-    fn sleep(&self, dur: Duration) -> impl Future<Output = ()> + Send {
+    type Sleep = tokio::time::Sleep;
+    fn sleep(&self, dur: Duration) -> tokio::time::Sleep {
         tokio::time::sleep(dur)
     }
 

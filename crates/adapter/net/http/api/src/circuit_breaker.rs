@@ -637,6 +637,18 @@ mod classify_tests {
     }
 
     #[test]
+    fn body_too_large_is_breaker_neutral_not_a_failure() {
+        // `BodyTooLarge` is a purely LOCAL size-cap rejection — the request reached
+        // the host and a response was flowing, but the cap is a local policy
+        // decision, not a host-health signal — so it must be Ignored, never
+        // Failure, even if the classify catch-all above is ever narrowed.
+        assert_eq!(
+            classify::<()>(&Err(HttpError::BodyTooLarge)),
+            Class::Ignored
+        );
+    }
+
+    #[test]
     fn client_errors_auth_and_unknown_are_ignored() {
         assert_eq!(classify(&ok(400)), Class::Ignored);
         assert_eq!(classify(&ok(404)), Class::Ignored);

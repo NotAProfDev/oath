@@ -97,7 +97,8 @@ impl Future for Sleep {
 }
 
 impl Timer for MockTimer {
-    fn sleep(&self, dur: Duration) -> impl Future<Output = ()> + Send {
+    type Sleep = Sleep;
+    fn sleep(&self, dur: Duration) -> Sleep {
         let deadline = {
             let state = lock(&self.state);
             state.now + dur

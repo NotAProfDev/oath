@@ -73,6 +73,7 @@ async fn main() {
         },
         headers: http::HeaderMap::new(),
         rate_limit_max_wait: Duration::from_secs(0),
+        body_stall_timeout: Some(Duration::from_secs(30)),
     };
     let rates = RateLimitConfig {
         global: LimitPolicy::TokenBucket {
@@ -91,6 +92,7 @@ async fn main() {
         http2_keep_alive_interval: None,
         http2_keep_alive_timeout: Duration::from_secs(10),
         http2_keep_alive_while_idle: false,
+        max_response_bytes: Some(16 * 1024 * 1024),
     };
 
     let client = build(cfg, TokioTimer, NoAuth, rates, conn).expect("valid config");

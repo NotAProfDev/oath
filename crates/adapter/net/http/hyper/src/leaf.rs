@@ -7,6 +7,7 @@
 
 use crate::error::{map_hyper_err, map_legacy_err};
 use bytes::Bytes;
+use http_body::Body;
 use http_body_util::combinators::MapErr;
 use http_body_util::{BodyExt, Full};
 use hyper::body::Incoming;
@@ -14,7 +15,7 @@ use hyper_rustls::HttpsConnector;
 use hyper_util::client::legacy::Client;
 use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::rt::{TokioExecutor, TokioTimer as HyperPoolTimer};
-use oath_adapter_net_http_api::{BufferMode, HttpError, ResponseBody, Service};
+use oath_adapter_net_http_api::{BufferMode, HttpError, LimitedBody, ResponseBody, Service};
 use rustls::RootCertStore;
 use rustls::pki_types::CertificateDer;
 use std::future::Future;
@@ -103,6 +104,13 @@ pub struct ConnConfig {
     /// Send keepalive PINGs even with no active requests. Ignored when
     /// `http2_keep_alive_interval` is `None`.
     pub http2_keep_alive_while_idle: bool,
+    /// Maximum bytes to buffer for a `BufferMode::Buffer` response; `None` =
+    /// unbounded. Rejects an oversized body with [`HttpError::BodyTooLarge`]
+    /// (ADR-0034 Amendment #13) — memory-safety for a misbehaving venue.
+    /// Unlike `body_stall_timeout`, `Some(0)` is not rejected at boot: it is a
+    /// valid (if extreme) policy meaning "reject every non-empty buffered body",
+    /// not "no limit" — don't misread it as unbounded.
+    pub max_response_bytes: Option<usize>,
 }
 
 /// The hyper backend leaf. `Clone` (the pool **and** the in-flight tracker are
@@ -111,6 +119,7 @@ pub struct ConnConfig {
 pub struct HyperLeaf {
     client: Client<HttpsConnector<HttpConnector>, Full<Bytes>>,
     inflight: Arc<InFlight>,
+    max_response_bytes: Option<usize>,
 }
 
 impl std::fmt::Debug for HyperLeaf {
@@ -158,6 +167,7 @@ impl Service<http::Request<Bytes>> for HyperLeaf {
         // in-flight from invocation until the future completes or is dropped, so
         // `shutdown` can drain it.
         let guard = InFlightGuard::enter(&self.inflight);
+        let max_response_bytes = self.max_response_bytes;
         async move {
             let _guard = guard;
             // ADR-0030 §4: absent extension ⇒ Stream. `BufferMode` is `Copy`.
@@ -177,7 +187,23 @@ impl Service<http::Request<Bytes>> for HyperLeaf {
                 },
                 BufferMode::Buffer => {
                     // Collect inside the retry boundary → full-body retry coverage.
-                    let bytes = incoming.collect().await.map_err(map_hyper_err)?.to_bytes();
+                    let bytes = match max_response_bytes {
+                        Some(cap) => {
+                            let cap = cap as u64;
+                            if incoming
+                                .size_hint()
+                                .upper()
+                                .is_some_and(|upper| upper > cap)
+                            {
+                                return Err(HttpError::BodyTooLarge);
+                            }
+                            LimitedBody::new(incoming.map_err(map_hyper_err), cap)
+                                .collect()
+                                .await?
+                                .to_bytes()
+                        },
+                        None => incoming.collect().await.map_err(map_hyper_err)?.to_bytes(),
+                    };
                     ResponseBody::buffered(bytes)
                 },
             };
@@ -194,6 +220,7 @@ impl Service<http::Request<Bytes>> for HyperLeaf {
 /// HTTPS-only unless [`ConnConfig::allow_http`] is set; optional HTTP/2 keepalive.
 #[must_use]
 pub fn hyper_leaf(conn: ConnConfig) -> HyperLeaf {
+    let max_response_bytes = conn.max_response_bytes;
     let mut http = HttpConnector::new();
     http.enforce_http(false); // let the HTTPS wrapper handle `https://`
     http.set_connect_timeout(Some(conn.connect_timeout));
@@ -234,6 +261,7 @@ pub fn hyper_leaf(conn: ConnConfig) -> HyperLeaf {
     HyperLeaf {
         client,
         inflight: Arc::new(InFlight::default()),
+        max_response_bytes,
     }
 }
 
@@ -261,6 +289,7 @@ mod tests {
             http2_keep_alive_interval: None,
             http2_keep_alive_timeout: Duration::from_secs(10),
             http2_keep_alive_while_idle: false,
+            max_response_bytes: None,
         }
     }
 
@@ -286,6 +315,147 @@ mod tests {
             }
         });
         format!("http://{addr}")
+    }
+
+    // Serves a body of `n` bytes with an explicit Content-Length (via Full<Bytes>).
+    async fn spawn_body_server(n: usize) -> String {
+        let payload = Bytes::from(vec![b'x'; n]);
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            loop {
+                let (stream, _) = listener.accept().await.unwrap();
+                let payload = payload.clone();
+                let io = hyper_util::rt::TokioIo::new(stream);
+                tokio::spawn(async move {
+                    let svc = hyper::service::service_fn(move |_r| {
+                        let payload = payload.clone();
+                        async move {
+                            Ok::<_, Infallible>(hyper::Response::new(http_body_util::Full::new(
+                                payload,
+                            )))
+                        }
+                    });
+                    let _ = hyper::server::conn::http1::Builder::new()
+                        .serve_connection(io, svc)
+                        .await;
+                });
+            }
+        });
+        format!("http://{addr}")
+    }
+
+    #[tokio::test]
+    async fn buffer_rejects_an_oversized_content_length_upfront() {
+        let base = spawn_body_server(64).await;
+        let conn = ConnConfig {
+            max_response_bytes: Some(16),
+            ..test_conn()
+        };
+        let leaf = hyper_leaf(conn);
+        let mut req = http::Request::get(format!("{base}/big"))
+            .body(Bytes::new())
+            .unwrap();
+        req.extensions_mut().insert(BufferMode::Buffer);
+        let err = leaf
+            .call(req)
+            .await
+            .expect_err("64-byte body over a 16-byte cap");
+        assert!(
+            matches!(err, oath_adapter_net_http_api::HttpError::BodyTooLarge),
+            "expected BodyTooLarge, got {err:?}"
+        );
+    }
+
+    // Sends a chunked (no Content-Length) body of two `chunk`-sized pieces.
+    async fn spawn_chunked_server(chunk: &'static [u8], count: usize) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut buf = Vec::new();
+            let mut tmp = [0_u8; 256];
+            loop {
+                let n = stream.read(&mut tmp).await.unwrap();
+                assert!(n > 0, "peer closed before a full request head");
+                buf.extend_from_slice(&tmp[..n]);
+                if buf.windows(4).any(|w| w == b"\r\n\r\n") {
+                    break;
+                }
+            }
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n")
+                .await
+                .unwrap();
+            for _ in 0..count {
+                stream
+                    .write_all(format!("{:x}\r\n", chunk.len()).as_bytes())
+                    .await
+                    .unwrap();
+                stream.write_all(chunk).await.unwrap();
+                stream.write_all(b"\r\n").await.unwrap();
+            }
+            stream.write_all(b"0\r\n\r\n").await.unwrap();
+            stream.flush().await.unwrap();
+        });
+        format!("http://{addr}")
+    }
+
+    #[tokio::test]
+    async fn buffer_caps_an_unsized_streaming_body_while_collecting() {
+        // Two 8-byte chunks = 16 bytes, no Content-Length, over a 10-byte cap.
+        let base = spawn_chunked_server(b"12345678", 2).await;
+        let conn = ConnConfig {
+            max_response_bytes: Some(10),
+            ..test_conn()
+        };
+        let leaf = hyper_leaf(conn);
+        let mut req = http::Request::get(format!("{base}/chunked"))
+            .body(Bytes::new())
+            .unwrap();
+        req.extensions_mut().insert(BufferMode::Buffer);
+        let err = leaf
+            .call(req)
+            .await
+            .expect_err("16 chunked bytes over a 10-byte cap");
+        assert!(
+            matches!(err, oath_adapter_net_http_api::HttpError::BodyTooLarge),
+            "expected BodyTooLarge from the streaming cap, got {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn buffer_under_cap_collects_normally() {
+        let base = spawn_body_server(8).await;
+        let conn = ConnConfig {
+            max_response_bytes: Some(1024),
+            ..test_conn()
+        };
+        let leaf = hyper_leaf(conn);
+        let mut req = http::Request::get(format!("{base}/small"))
+            .body(Bytes::new())
+            .unwrap();
+        req.extensions_mut().insert(BufferMode::Buffer);
+        let resp = leaf.call(req).await.expect("8-byte body under a 1KiB cap");
+        let body = resp.into_body().collect().await.unwrap().to_bytes();
+        assert_eq!(body.len(), 8);
+    }
+
+    #[tokio::test]
+    async fn buffer_with_no_cap_is_unbounded() {
+        let base = spawn_body_server(64).await;
+        let conn = ConnConfig {
+            max_response_bytes: None,
+            ..test_conn()
+        };
+        let leaf = hyper_leaf(conn);
+        let mut req = http::Request::get(format!("{base}/big"))
+            .body(Bytes::new())
+            .unwrap();
+        req.extensions_mut().insert(BufferMode::Buffer);
+        let resp = leaf.call(req).await.expect("no cap → unbounded");
+        let body = resp.into_body().collect().await.unwrap().to_bytes();
+        assert_eq!(body.len(), 64);
     }
 
     #[tokio::test]

@@ -91,6 +91,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `http_circuit_breaker_transitions_total{to="open"}` metric gains a `reason` label
   (`rate`/`throttle`/`probe_failed`/`abandoned`). Prior art: tower-resilience (not
   adopted — OATH keeps its RPITIT `Service`).
+- **Breaking (pre-release) — net timing + config surface.** `Timer` gains an associated
+  `type Sleep: Future<Output=()> + Send` (was `fn sleep(&self) -> impl Future`), so body
+  wrappers store the sleep future inline without boxing. `HttpConfig` gains
+  `body_stall_timeout: Option<Duration>` and `ConnConfig` gains
+  `max_response_bytes: Option<usize>` (both new required fields); `HttpError`/`ErrorKind`
+  gain a `BodyTooLarge` variant.
 
 ### Added
 
@@ -268,6 +274,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `retry_after_fallback` default). `429` is still never retried. An `HTTP-date`,
   float, overflowing, or absent value falls back to existing behavior. A new
   site-labelled `http_retry_after_honored_total` metric. (ADR-0031 Amendment #2)
+- **net-http response-body bounds.** A streaming **stall timeout** (`StallTimeoutLayer`
+  / `TimeoutBody`, `HttpConfig.body_stall_timeout`) bounds a mid-transfer body
+  inactivity gap so a slow venue body can no longer wedge a concurrency permit; a
+  **buffered size cap** (`LimitedBody`, `ConnConfig::max_response_bytes`) rejects an
+  oversized `BufferMode::Buffer` body with the new non-retryable `HttpError::BodyTooLarge`
+  (`error_kind="body_too_large"`) before OOM. Both are `Option` (disable-able).
+  Implements ADR-0034 Amendment #13 (un-defers Am#6's `TimeoutBody`; wires §2's size guard).
 
 ### Fixed
 

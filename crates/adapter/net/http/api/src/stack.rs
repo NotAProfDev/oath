@@ -1,20 +1,23 @@
 //! The `stack()` assembly (ADR-0031 §1) + the non-generic `HttpConfig`.
 //!
 //! [`stack`] composes the canonical resilience order over any leaf:
-//! `Tracing( CircuitBreaker( Retry( RateLimit( Timeout( SetHeaders( Auth( leaf ) ) ) ) ) ) )`.
+//! `Tracing( CircuitBreaker( Retry( RateLimit( Timeout( StallTimeout( SetHeaders( Auth( leaf ) ) ) ) ) ) ) )`.
 //! It builds the one fallible layer ([`RateLimitLayer`],
 //! which validates pacing coverage + the concurrency-singleton invariant) first,
 //! so a coverage/param error is a [`BuildError`] before the
 //! rest is assembled. `Auth`/`SetHeaders` are direct `Service` wrappers (no
-//! `Layer` factory), so they pre-wrap the leaf; the five `Layer`-factory layers
+//! `Layer` factory), so they pre-wrap the leaf; the six `Layer`-factory layers
 //! compose over that via [`LayerBuilder`]
-//! (first `.layer()` = outermost). The composed value satisfies
-//! [`HttpClient`] by blanket impl.
+//! (first `.layer()` = outermost). [`StallTimeoutLayer`] sits innermost of the
+//! `Layer`-factory chain — just outside `SetHeaders`/`Auth` — so `Guarded` (the
+//! concurrency permit) ends up OUTSIDE the stall-bounded body and a stall
+//! releases the permit instead of pinning it (ADR-0034 Amendment #13). The
+//! composed value satisfies [`HttpClient`] by blanket impl.
 
 use crate::rate::{BuildError, RateKey, RateLimitConfig};
 use crate::{
     Auth, AuthSource, CircuitBreakerConfig, CircuitBreakerLayer, HttpClient, RateLimitLayer,
-    RetryConfig, RetryLayer, SetHeaders, TimeoutLayer, TracingLayer,
+    RetryConfig, RetryLayer, SetHeaders, StallTimeoutLayer, TimeoutLayer, TracingLayer,
 };
 use oath_adapter_net_api::{LayerBuilder, Timer};
 use std::fmt;
@@ -41,6 +44,11 @@ pub struct HttpConfig {
     /// `timeout`: `RateLimit` sits **outside** `Timeout`, so the permit wait is
     /// bounded by this — at IBKR's 1/15-min buckets, minutes not seconds.
     pub rate_limit_max_wait: Duration,
+    /// Per-frame inactivity deadline for a **streaming** response body; `None`
+    /// disables it. Bounds a mid-transfer stall so a slow body cannot pin a
+    /// concurrency permit indefinitely (ADR-0034 Amendment #13). Inert on
+    /// buffered responses.
+    pub body_stall_timeout: Option<Duration>,
 }
 
 impl fmt::Debug for HttpConfig {
@@ -51,6 +59,7 @@ impl fmt::Debug for HttpConfig {
             .field("retry", &self.retry)
             .field("circuit_breaker", &self.circuit_breaker)
             .field("rate_limit_max_wait", &self.rate_limit_max_wait)
+            .field("body_stall_timeout", &self.body_stall_timeout)
             .finish_non_exhaustive()
     }
 }
@@ -62,7 +71,7 @@ impl fmt::Debug for HttpConfig {
 /// total over `K::all()`, carries an out-of-range policy param, or breaches the
 /// ≤1-concurrency-permit invariant is a [`BuildError`] before the infallible layers
 /// are assembled. Then composes, outermost-first:
-/// `Tracing( CircuitBreaker( Retry( RateLimit( Timeout( SetHeaders( Auth( leaf ) ) ) ) ) ) )`.
+/// `Tracing( CircuitBreaker( Retry( RateLimit( Timeout( StallTimeout( SetHeaders( Auth( leaf ) ) ) ) ) ) ) )`.
 /// `Auth`/`SetHeaders` are direct `Service` wrappers (no `Layer` factory), so they
 /// pre-wrap the leaf; the composed value satisfies [`HttpClient`] by blanket impl.
 ///
@@ -137,6 +146,7 @@ impl fmt::Debug for HttpConfig {
 ///     },
 ///     headers: http::HeaderMap::new(),
 ///     rate_limit_max_wait: Duration::from_secs(0),
+///     body_stall_timeout: Some(Duration::from_secs(30)),
 /// };
 /// let rates = RateLimitConfig {
 ///     global: LimitPolicy::TokenBucket { rate: 1000, per: Duration::from_secs(1), burst: 1000 },
@@ -176,7 +186,8 @@ where
         .layer(CircuitBreakerLayer::new(cfg.circuit_breaker, timer.clone()))
         .layer(RetryLayer::new(cfg.retry, timer.clone()))
         .layer(rate)
-        .layer(TimeoutLayer::new(cfg.timeout, timer)) // innermost Layer-factory
+        .layer(TimeoutLayer::new(cfg.timeout, timer.clone()))
+        .layer(StallTimeoutLayer::new(cfg.body_stall_timeout, timer)) // innermost
         .wrap(inner);
     Ok(svc)
 }
@@ -213,6 +224,11 @@ const fn validate_config(cfg: &HttpConfig) -> Result<(), BuildError> {
     }
     if cfg.circuit_breaker.retry_after_cap.is_zero() {
         return Err(BuildError::ZeroDuration("circuit_breaker.retry_after_cap"));
+    }
+    if let Some(d) = cfg.body_stall_timeout
+        && d.is_zero()
+    {
+        return Err(BuildError::ZeroDuration("body_stall_timeout"));
     }
     if cfg.circuit_breaker.failure_rate_threshold == 0
         || cfg.circuit_breaker.failure_rate_threshold > 100
@@ -430,6 +446,7 @@ mod tests {
             },
             headers: http::HeaderMap::new(),
             rate_limit_max_wait: max_wait,
+            body_stall_timeout: Some(Duration::from_secs(30)),
         }
     }
     // Global effectively unlimited; Snapshot 2/s; History concurrency 1.
@@ -932,6 +949,75 @@ mod tests {
             1,
             "only the well-formed request reached the leaf"
         );
+    }
+
+    // A streaming body that never yields a frame (models a mid-transfer stall).
+    #[derive(Debug)]
+    struct StallingBody;
+    impl Body for StallingBody {
+        type Data = Bytes;
+        type Error = HttpError;
+        fn poll_frame(
+            self: Pin<&mut Self>,
+            _: &mut Context<'_>,
+        ) -> Poll<Option<Result<Frame<Bytes>, HttpError>>> {
+            Poll::Pending
+        }
+        fn is_end_stream(&self) -> bool {
+            false
+        }
+        fn size_hint(&self) -> SizeHint {
+            SizeHint::default()
+        }
+    }
+
+    // A dedicated minimal leaf (not `ScriptLeaf`, whose `Response` is pinned to
+    // `http::Response<StubBody>`) that always returns a stalling streaming body.
+    #[derive(Clone)]
+    struct StallLeaf;
+    impl Service<http::Request<Bytes>> for StallLeaf {
+        type Response = http::Response<StallingBody>;
+        type Error = HttpError;
+        async fn call(&self, _req: http::Request<Bytes>) -> Result<Self::Response, HttpError> {
+            Ok(http::Response::new(StallingBody))
+        }
+    }
+
+    #[tokio::test]
+    async fn a_stalled_streaming_body_times_out_through_the_stack() {
+        let timer = MockTimer::new();
+        let mut cfg = http_cfg(1, Duration::from_secs(3600), Duration::ZERO);
+        cfg.body_stall_timeout = Some(Duration::from_secs(1)); // short body-stall bound
+        let svc = stack(StallLeaf, cfg, timer.clone(), NoAuth, rate_cfg()).expect("total config");
+
+        // The send returns at headers immediately; the stall bites while draining.
+        let resp = svc
+            .call(req(RateScope::Global))
+            .await
+            .expect("headers arrive");
+        let waiter = tokio::spawn(async move {
+            let mut body = std::pin::pin!(resp.into_body());
+            std::future::poll_fn(|cx| body.as_mut().poll_frame(cx)).await
+        });
+        tokio::task::yield_now().await; // body registers the stall deadline
+        timer.advance(Duration::from_secs(1)); // fire it
+        let frame = waiter.await.unwrap();
+        assert!(
+            matches!(frame, Some(Err(HttpError::Timeout))),
+            "a stalled streaming body must surface Timeout when drained"
+        );
+    }
+
+    #[test]
+    fn zero_body_stall_timeout_is_rejected_at_build() {
+        let timer = MockTimer::new();
+        let leaf = ScriptLeaf::new(timer.clone(), vec![Step::Status(200)]);
+        let mut cfg = http_cfg(1, Duration::from_secs(1), Duration::ZERO);
+        cfg.body_stall_timeout = Some(Duration::ZERO);
+        let Err(err) = stack(leaf, cfg, timer, NoAuth, rate_cfg()) else {
+            panic!("Some(ZERO) body_stall_timeout must be a BuildError");
+        };
+        assert_eq!(err, BuildError::ZeroDuration("body_stall_timeout"));
     }
 
     #[test]
