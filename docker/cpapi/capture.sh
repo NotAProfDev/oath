@@ -21,7 +21,10 @@ fetch() {
 }
 
 fetch GET  /iserver/auth/status auth_status.json
-fetch POST /tickle              tickle.json
+# POST /tickle with no body returns 411 (Length Required); send an empty body so
+# curl sets Content-Length: 0.
+curl -fksS --max-time 30 -X POST --data '' "$BASE/tickle" -o "$OUT/tickle.json"
+echo "captured tickle.json"
 fetch GET  /iserver/accounts    iserver_accounts.json
 fetch GET  /portfolio/accounts  portfolio_accounts.json
 
@@ -37,6 +40,7 @@ curl -fksS --max-time 30 -X POST "$BASE/iserver/secdef/search" \
   -o "$OUT/secdef_search.json"
 echo "captured secdef_search.json"
 
-fetch GET "/iserver/secdef/info?conid=265598&secType=STK" secdef_info.json
+# secType=STK triggers 400 "month required" on a stock; pass conid alone.
+fetch GET "/iserver/secdef/info?conid=265598" secdef_info.json
 
 echo "DONE. SANITIZE before committing: scrub account ids, balances, and names."

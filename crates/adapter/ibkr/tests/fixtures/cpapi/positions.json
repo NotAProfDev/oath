@@ -1,1 +1,1 @@
-[{"acctId":"DU0000000","conid":265598,"contractDesc":"AAPL","position":100,"mktPrice":150.25,"mktValue":15025.0,"currency":"USD","assetClass":"STK"}]
+[{"acctId":"DU0000000","conid":265598,"contractDesc":"AAPL","position":0.0,"mktPrice":314.341156,"mktValue":0.0,"currency":"USD","avgCost":0.0,"avgPrice":0.0,"realizedPnl":0.0,"unrealizedPnl":0.0,"exchs":null,"expiry":null,"putOrCall":null,"multiplier":null,"strike":0.0,"exerciseStyle":null,"conExchMap":[],"assetClass":"STK","undConid":0,"model":""}]

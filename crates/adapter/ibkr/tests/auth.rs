@@ -18,3 +18,11 @@ fn tickle_relays_iserver_auth_status() {
     let iserver = tickle.iserver.expect("tickle relays the iserver block");
     assert!(iserver.auth_status.authenticated);
 }
+
+#[test]
+fn tickle_binds_ibkrs_misspelled_collission_key() {
+    // IBKR sends the collision flag under the misspelled key `collission`; ensure
+    // our rename binds it (a correctly-spelled key would silently default to false).
+    let tickle: TickleResponse = decode(br#"{"session":"s","collission":true}"#).expect("decodes");
+    assert!(tickle.collision);
+}
