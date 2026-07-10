@@ -23,6 +23,7 @@ members = [
   "crates/core/host",
   "crates/strategy/api",
   "crates/adapter/api",
+  "crates/adapter/ibkr",
   "crates/strategy/host",
   "crates/cli",
   "crates/supervisor",
@@ -60,6 +61,7 @@ oath-core-portfolio = { path = "crates/core/portfolio", version = "0.1.0" }
 oath-core-risk = { path = "crates/core/risk", version = "0.1.0" }
 oath-strategy-api = { path = "crates/strategy/api", version = "0.1.0" }
 oath-adapter-api = { path = "crates/adapter/api", version = "0.1.0" }
+oath-adapter-ibkr = { path = "crates/adapter/ibkr", version = "0.1.0" }
 oath-core-api = { path = "crates/core/api", version = "0.1.0" }
 oath-core-kernel = { path = "crates/core/kernel", version = "0.1.0" }
 

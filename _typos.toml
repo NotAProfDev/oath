@@ -14,3 +14,12 @@ extend-exclude = ["Cargo.lock", "target/"]
 oath = "oath"
 # Mermaid diagram node abbreviations used in README.md architecture diagrams.
 strat = "strat"
+# IBKR Client Portal API v1 jargon (see crates/adapter/ibkr).
+cpapi = "cpapi"
+iserver = "iserver"
+secdef = "secdef"
+conid = "conid"
+ssodh = "ssodh"
+acct = "acct"
+mkt = "mkt"
+hmds = "hmds"
