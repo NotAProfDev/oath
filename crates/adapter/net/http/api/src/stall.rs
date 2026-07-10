@@ -6,6 +6,10 @@
 //! longer wedge a `Guarded` concurrency permit. Placed innermost in `stack()` so
 //! `Guarded` wraps [`TimeoutBody`] and the stall error releases the permit.
 //! Inert on buffered bodies (one ready frame) and when the deadline is `None`.
+//! This guard bounds mid-transfer *inactivity*, not total transferred size: a
+//! steady, never-idle `BufferMode::Stream` response is bounded by neither this
+//! guard nor the buffered-size cap, by design — in Stream mode the caller owns
+//! accumulation, and the cap applies only to `BufferMode::Buffer`.
 
 use crate::{HttpError, Service};
 use bytes::Bytes;

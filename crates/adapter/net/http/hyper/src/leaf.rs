@@ -107,6 +107,9 @@ pub struct ConnConfig {
     /// Maximum bytes to buffer for a `BufferMode::Buffer` response; `None` =
     /// unbounded. Rejects an oversized body with [`HttpError::BodyTooLarge`]
     /// (ADR-0034 Amendment #13) — memory-safety for a misbehaving venue.
+    /// Unlike `body_stall_timeout`, `Some(0)` is not rejected at boot: it is a
+    /// valid (if extreme) policy meaning "reject every non-empty buffered body",
+    /// not "no limit" — don't misread it as unbounded.
     pub max_response_bytes: Option<usize>,
 }
 
