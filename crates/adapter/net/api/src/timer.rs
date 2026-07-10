@@ -10,8 +10,13 @@ use std::time::{Duration, Instant};
 /// it deterministically in tests while production passes a runtime-backed impl.
 /// A trait — not a runtime — so the kernel stays std-only.
 pub trait Timer: Clone + Send + Sync {
+    /// The concrete future returned by [`sleep`](Timer::sleep). Named (not
+    /// `impl Future`) so body wrappers can store it inline in a `#[pin]` field
+    /// without boxing.
+    type Sleep: Future<Output = ()> + Send;
+
     /// Complete after `dur` has elapsed.
-    fn sleep(&self, dur: Duration) -> impl Future<Output = ()> + Send;
+    fn sleep(&self, dur: Duration) -> Self::Sleep;
 
     /// The current instant — for elapsed-time reads (token-bucket refill,
     /// circuit cooldown).
@@ -21,14 +26,14 @@ pub trait Timer: Clone + Send + Sync {
 #[cfg(test)]
 mod tests {
     use super::Timer;
-    use std::future::Future;
     use std::time::{Duration, Instant};
 
     #[derive(Clone)]
     struct FixedTimer(Instant);
 
     impl Timer for FixedTimer {
-        fn sleep(&self, _dur: Duration) -> impl Future<Output = ()> + Send {
+        type Sleep = std::future::Ready<()>;
+        fn sleep(&self, _dur: Duration) -> std::future::Ready<()> {
             std::future::ready(())
         }
         fn now(&self) -> Instant {
