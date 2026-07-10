@@ -211,13 +211,105 @@ where
     }
 }
 
+pin_project_lite::pin_project! {
+    /// Wraps a response body, failing with [`HttpError::BodyTooLarge`] once the
+    /// cumulative DATA-frame bytes exceed `remaining`. A **typed** alternative to
+    /// `http_body_util::Limited` (which boxes its error): the whole HTTP stack
+    /// keeps one concrete `HttpError` for service *and* body. Forwards
+    /// `is_end_stream`; clamps `size_hint` to `remaining` (ADR-0034 §2), so a
+    /// downstream collector stays bounded.
+    pub struct LimitedBody<B> {
+        #[pin]
+        inner: B,
+        remaining: u64,
+    }
+}
+
+impl<B> LimitedBody<B> {
+    /// Wrap `inner`, rejecting once cumulative DATA bytes exceed `max_bytes`.
+    ///
+    /// # Example
+    /// ```
+    /// use oath_adapter_net_http_api::LimitedBody;
+    /// use http_body_util::Empty;
+    /// use bytes::Bytes;
+    ///
+    /// let _body = LimitedBody::new(Empty::<Bytes>::new(), 16 * 1024 * 1024);
+    /// ```
+    #[must_use]
+    pub const fn new(inner: B, max_bytes: u64) -> Self {
+        Self {
+            inner,
+            remaining: max_bytes,
+        }
+    }
+}
+
+impl<B: fmt::Debug> fmt::Debug for LimitedBody<B> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("LimitedBody")
+            .field("inner", &self.inner)
+            .field("remaining", &self.remaining)
+            .finish()
+    }
+}
+
+impl<B> Body for LimitedBody<B>
+where
+    B: Body<Data = Bytes, Error = HttpError>,
+{
+    type Data = Bytes;
+    type Error = HttpError;
+
+    fn poll_frame(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Option<Result<Frame<Bytes>, HttpError>>> {
+        let this = self.project();
+        match ready!(this.inner.poll_frame(cx)) {
+            Some(Ok(frame)) => {
+                if let Some(data) = frame.data_ref() {
+                    let len = data.len() as u64;
+                    if len > *this.remaining {
+                        *this.remaining = 0;
+                        return Poll::Ready(Some(Err(HttpError::BodyTooLarge)));
+                    }
+                    *this.remaining -= len;
+                }
+                Poll::Ready(Some(Ok(frame)))
+            },
+            // Terminal None or an inner error: pass through unchanged.
+            other => Poll::Ready(other),
+        }
+    }
+
+    fn is_end_stream(&self) -> bool {
+        self.inner.is_end_stream()
+    }
+
+    fn size_hint(&self) -> SizeHint {
+        // Mirror http_body_util::Limited's clamp so lower never exceeds upper.
+        let mut hint = self.inner.size_hint();
+        let n = self.remaining;
+        if hint.lower() >= n {
+            hint.set_exact(n);
+        } else if let Some(max) = hint.upper() {
+            hint.set_upper(n.min(max));
+        } else {
+            hint.set_upper(n);
+        }
+        hint
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{BufferMode, Guarded, ResponseBody};
+    use super::{BufferMode, Guarded, LimitedBody, ResponseBody};
     use crate::HttpError;
     use async_lock::Semaphore;
     use bytes::Bytes;
     use http_body::{Body, Frame, SizeHint};
+    use http_body_util::BodyExt;
     use std::collections::VecDeque;
     use std::pin::{Pin, pin};
     use std::sync::Arc;
@@ -460,5 +552,137 @@ mod tests {
             sem.try_acquire_arc().is_some(),
             "permit released on the error frame"
         );
+    }
+
+    #[tokio::test]
+    async fn limited_body_passes_under_cap() {
+        let body = LimitedBody::new(Frames::new([b"ab", b"cde"]), 10);
+        let bytes = body.collect().await.unwrap().to_bytes();
+        assert_eq!(bytes, Bytes::from_static(b"abcde"));
+    }
+
+    #[tokio::test]
+    async fn limited_body_passes_at_exact_cap() {
+        // 2 + 3 == 5; each frame's len is not > remaining, so the boundary passes.
+        let body = LimitedBody::new(Frames::new([b"ab", b"cde"]), 5);
+        let bytes = body.collect().await.unwrap().to_bytes();
+        assert_eq!(bytes, Bytes::from_static(b"abcde"));
+    }
+
+    #[tokio::test]
+    async fn limited_body_errors_over_cap() {
+        // cap 4: "abc" (3) ok → remaining 1; "def" (3) > 1 → BodyTooLarge.
+        let body = LimitedBody::new(Frames::new([b"abc", b"def"]), 4);
+        let err = body.collect().await.expect_err("must overflow");
+        assert!(matches!(err, HttpError::BodyTooLarge));
+    }
+
+    #[test]
+    fn limited_body_clamps_size_hint_and_forwards_is_end_stream() {
+        // inner exact = 100, cap 10 → clamp to exact 10 (lower >= remaining path).
+        let wrapped = LimitedBody::new(Stub { remaining: 100 }, 10);
+        assert_eq!(wrapped.size_hint().exact(), Some(10));
+        assert!(!wrapped.is_end_stream());
+        let ended = LimitedBody::new(Stub { remaining: 0 }, 10);
+        assert!(ended.is_end_stream()); // forwarded
+    }
+
+    /// Inner body reporting a RANGE size hint (`lower != upper`), unlike
+    /// `Stub`'s exact hint — needed to exercise `LimitedBody::size_hint`'s
+    /// `lower < remaining` branches, which an exact hint can never reach.
+    struct RangeHint {
+        lower: u64,
+        upper: Option<u64>,
+    }
+
+    impl Body for RangeHint {
+        type Data = Bytes;
+        type Error = HttpError;
+        fn poll_frame(
+            self: Pin<&mut Self>,
+            _: &mut Context<'_>,
+        ) -> Poll<Option<Result<Frame<Bytes>, HttpError>>> {
+            Poll::Ready(None)
+        }
+        fn size_hint(&self) -> SizeHint {
+            let mut hint = SizeHint::default();
+            hint.set_lower(self.lower);
+            if let Some(upper) = self.upper {
+                hint.set_upper(upper);
+            }
+            hint
+        }
+    }
+
+    #[test]
+    fn limited_body_clamps_size_hint_upper_when_bounded_above_cap() {
+        // inner lower(2) < cap(10) and inner upper(50) > cap: the
+        // `lower < remaining` branch with `Some(max)` must clamp upper to
+        // `remaining.min(max)` == 10, not leave it at the inner's 50.
+        let wrapped = LimitedBody::new(
+            RangeHint {
+                lower: 2,
+                upper: Some(50),
+            },
+            10,
+        );
+        let hint = wrapped.size_hint();
+        assert_eq!(hint.upper(), Some(10));
+        assert!(hint.lower() <= 10);
+    }
+
+    #[test]
+    fn limited_body_clamps_size_hint_upper_when_inner_unbounded() {
+        // inner lower(2) < cap(10) and inner upper is `None` (unbounded): the
+        // final `else` branch must set upper to `remaining` == 10, not leave
+        // it unbounded.
+        let wrapped = LimitedBody::new(
+            RangeHint {
+                lower: 2,
+                upper: None,
+            },
+            10,
+        );
+        assert_eq!(wrapped.size_hint().upper(), Some(10));
+    }
+
+    /// Yields a trailers frame (no `data_ref()`), then ends. Used to prove
+    /// `LimitedBody` only counts DATA-frame bytes toward `remaining` — a
+    /// trailers frame must pass through without consuming budget or erroring.
+    struct TrailersOnly {
+        sent: bool,
+    }
+
+    impl Body for TrailersOnly {
+        type Data = Bytes;
+        type Error = HttpError;
+        fn poll_frame(
+            self: Pin<&mut Self>,
+            _: &mut Context<'_>,
+        ) -> Poll<Option<Result<Frame<Bytes>, HttpError>>> {
+            let this = self.get_mut();
+            if this.sent {
+                Poll::Ready(None)
+            } else {
+                this.sent = true;
+                Poll::Ready(Some(Ok(Frame::trailers(http::HeaderMap::new()))))
+            }
+        }
+        fn is_end_stream(&self) -> bool {
+            self.sent
+        }
+        fn size_hint(&self) -> SizeHint {
+            SizeHint::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn limited_body_does_not_count_trailers_toward_cap() {
+        // cap 0: if the trailers' bytes were (wrongly) counted, any nonzero
+        // count would overflow a zero cap and this would error. A tiny cap
+        // with a non-DATA-only frame is the sharpest regression trap.
+        let body = LimitedBody::new(TrailersOnly { sent: false }, 0);
+        let collected = body.collect().await.expect("trailers must not error");
+        assert!(collected.trailers().is_some());
     }
 }

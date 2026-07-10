@@ -10,6 +10,7 @@ oath-adapter-net-api = { workspace = true }
 oath-adapter-net-http-api = { workspace = true }
 bytes = { workspace = true }
 http = { workspace = true }
+http-body = { workspace = true }
 http-body-util = { workspace = true }
 hyper = { workspace = true }
 hyper-util = { workspace = true }

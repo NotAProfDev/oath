@@ -296,3 +296,17 @@ carries the full reasoning.
     The breaker's `throttle_cooldown` field is renamed **`retry_after_fallback`**, and a
     new **`retry_after_cap`** bounds an honored value. The `HTTP-date` form and
     alternate/absolute headers stay deferred (they need a wall-clock `Timer` seam).
+13. **Response-body bounds — un-defers Am#6's `TimeoutBody`; wires §2's size guard.**
+    The streaming mid-stream-stall `TimeoutBody` deferred in Amendment #6 lands as a
+    `StallTimeoutLayer` (innermost, inside `RateLimit` so `Guarded` wraps it): a
+    per-frame **inactivity** timeout via the `Timer` seam, `HttpError::Timeout` on
+    stall, inert on buffered bodies and when disabled. To store the sleep future
+    inline (no `Box`/`dyn`), `Timer` gains `type Sleep: Future<Output=()> + Send`.
+    Independently, `BufferMode::Buffer`'s collect is **capped**
+    (`ConnConfig::max_response_bytes`) via a typed `LimitedBody` wrapper plus a
+    `size_hint().upper()` fast-fail, completing the max-size guard §2's
+    wrapper-transparency was built to support (N1); overflow is a new non-retryable
+    `HttpError::BodyTooLarge` (`ErrorKind::BodyTooLarge`, `error_kind="body_too_large"`).
+    Both config values are `Option` (disable-able); `HttpConfig.body_stall_timeout`
+    is `validate_config`-checked non-zero when `Some`. Cross-refs: ADR-0031 §1
+    (`Timeout`), ADR-0030 §4 (buffering).

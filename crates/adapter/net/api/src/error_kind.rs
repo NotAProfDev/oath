@@ -39,6 +39,11 @@ pub enum ErrorKind {
     /// cooldown elapses. A deliberate local decision, not a transport outcome;
     /// non-retryable.
     CircuitOpen,
+
+    /// A response body exceeded the configured maximum size and was rejected
+    /// before being fully buffered. A deliberate local decision, not a transport
+    /// outcome; non-retryable.
+    BodyTooLarge,
 }
 
 /// Implemented by error types that can be classified as an [`ErrorKind`].

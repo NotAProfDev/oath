@@ -413,6 +413,7 @@ mod tests {
             ErrorKind::Connection => HttpError::connection("reset"),
             ErrorKind::Throttled => HttpError::Throttled,
             ErrorKind::Auth => HttpError::auth("expired"),
+            ErrorKind::BodyTooLarge => HttpError::BodyTooLarge,
             _ => HttpError::other("boom"),
         }
     }
@@ -863,6 +864,24 @@ mod tests {
         assert_eq!(
             super::backoff_ceiling(base, cap, 4),
             Duration::from_millis(80)
+        );
+    }
+
+    #[tokio::test]
+    async fn body_too_large_is_not_retried() {
+        // BodyTooLarge is not a transient kind, so even an eligible request sends once.
+        let leaf = ScriptLeaf::new(vec![Step::Err(ErrorKind::BodyTooLarge)]);
+        let svc = RetryLayer::new(
+            cfg(3, Duration::from_millis(1), Duration::from_millis(1)),
+            MockTimer::new(),
+        )
+        .layer(leaf.clone());
+        let err = svc.call(req(true)).await.unwrap_err();
+        assert!(matches!(err, HttpError::BodyTooLarge));
+        assert_eq!(
+            leaf.calls(),
+            1,
+            "BodyTooLarge is non-transient → never retried"
         );
     }
 }
