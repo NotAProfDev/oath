@@ -6,8 +6,16 @@ services:
     ports:
       - "5000:5000"
     restart: "no"
-    # If the browser login is blocked (403 / "not allowed"), the gateway's shipped
-    # root/conf.yaml ips.allow is too strict for container networking. Copy the
-    # shipped root/conf.yaml out, widen ips.allow for local dev, and bind-mount it:
-    # volumes:
-    #   - ./conf.override.yaml:/opt/clientportal/root/conf.yaml:ro
+    # Hardening for this dev-only container (it terminates TLS and holds a live
+    # brokerage session). The widened ips.allow now lives in the baked conf.yaml,
+    # so no bind-mount override is needed.
+    cap_drop:
+      - ALL
+    security_opt:
+      - "no-new-privileges:true"
+    mem_limit: 512m
+    pids_limit: 256
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"

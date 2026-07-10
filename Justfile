@@ -94,9 +94,11 @@ shellcheck:
 # ── IBKR fixture capture ──────────────────────────────────────────────────────
 
 # Capture Client Portal API v1 read-path fixtures from a running, authenticated
-# gateway (see docker/cpapi/README.md). Pass a paper account id.
+# gateway (see docker/cpapi/README.md). Pass a paper account id. The gateway base
+# URL is resolved to the container's bridge IP because localhost:5000 is not
+# routable from inside a devcontainer.
 ibkr-capture account="":
-    docker/cpapi/capture.sh {{account}}
+    IBKR_GATEWAY="$(docker/cpapi/gateway-base-url.sh)" docker/cpapi/capture.sh {{account}}
 
 # ── Supply chain & docs ───────────────────────────────────────────────────────
 
