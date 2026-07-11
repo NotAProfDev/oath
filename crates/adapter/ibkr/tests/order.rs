@@ -70,6 +70,7 @@ fn order_place_questions_decode_as_question_shape() {
     // Confirmation fields are absent on a question.
     assert!(q.order_id.is_none());
     assert!(q.order_status.is_none());
+    assert!(q.encrypt_message.is_none());
 }
 
 #[test]
@@ -84,6 +85,7 @@ fn order_reply_confirmed_decodes_as_confirmation_shape() {
     // Question fields are absent on a confirmation.
     assert!(c.id.is_none());
     assert!(c.message.is_none());
+    assert!(c.is_suppressed.is_none());
 }
 
 #[test]

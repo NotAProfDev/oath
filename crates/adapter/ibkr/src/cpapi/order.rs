@@ -1,5 +1,5 @@
 //! Order write-path wire layer: request bodies for placing and confirming orders,
-//! plus the order-lifecycle response DTOs (added in later tasks).
+//! plus the order-lifecycle response DTOs (place/reply union, cancel, status, live orders).
 //!
 //! Faithfully mirrors Client Portal API v1 JSON — no transport, no auth, no
 //! OATH-domain translation, no order-safety semantics. `side`, `orderType`, and

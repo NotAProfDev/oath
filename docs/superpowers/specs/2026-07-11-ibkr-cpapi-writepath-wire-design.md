@@ -145,11 +145,11 @@ pub struct OrderPlaceReply {
     // "confirmation" shape (order accepted)
     pub order_id: Option<String>,
     pub order_status: Option<String>,
-    #[serde(rename = "encryptMessage")] pub encrypt_message: Option<String>,
+    pub encrypt_message: Option<String>,
 }
 
 pub struct CancelResponse {   // fields reconciled from live capture
-    pub order_id: Option<String>, pub msg: Option<String>,
+    pub order_id: Option<i64>, pub msg: Option<String>,
     pub conid: Option<i64>, pub account: Option<String>,
 }
 pub struct OrderStatus { /* order_id, conid, side, order_status, size fields — from live capture */ }
