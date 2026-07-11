@@ -30,9 +30,23 @@ resolves the gateway's container IP (localhost:5000 is not routable from inside 
 devcontainer). If the script aborts on an endpoint, the brokerage session likely
 isn't authenticated — log in at https://localhost:5000 and re-run.
 
+### Order write-path capture (paper only — has side effects)
+
+`just ibkr-capture <account>` also drives the order lifecycle: it places a **far-below-
+market resting LIMIT BUY** (price `1.00`, so it will not fill), confirms any reply
+warning, reads the order status + live orders, then **cancels** it. Nothing executes,
+but it does place and cancel a real paper order. Override the contract with
+`IBKR_CONID` (default AAPL `265598`).
+
+If the gateway raises no confirmable warning, `order_place.json` is the confirmation
+directly and no `order_place_questions.json` is captured — author that one as a
+documented representative fixture (its shape is covered by `OrderPlaceReply`).
+
 ## Sanitize before committing (required)
 The responses come from a real paper account. Before `git add`:
 - replace account ids (e.g. `DU…`/`U…`) with a placeholder like `DU0000000`,
 - zero out balances / P&L / quantities,
 - remove account holder names.
+- in the order fixtures, replace order ids (`order_id` / `orderId`) with a placeholder
+  like `1234567890` and any reply `id` with a fixed UUID placeholder.
 Keep `conid`s (public reference data). `gitleaks` runs in CI — no secrets.

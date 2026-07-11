@@ -744,11 +744,21 @@ print(d[0].get(sys.argv[2],"") if isinstance(d,list) and d else "")' "$1" "$2"
 
   order_id=$(jget "$confirm_file" order_id)
   if [ -n "$order_id" ]; then
-    fetch GET "/iserver/account/order/status/$order_id" order_status.json
-    fetch GET "/iserver/account/orders" live_orders.json
-    curl -fksS --max-time 30 -X DELETE "$BASE/iserver/account/$ACCOUNT/order/$order_id" \
-      -o "$OUT/order_cancel.json"
-    echo "captured order_cancel.json (cancelled order $order_id)"
+    if curl -fksS --max-time 30 -X GET "$BASE/iserver/account/order/status/$order_id" -o "$OUT/order_status.json"; then
+      echo "captured order_status.json"
+    else
+      echo "WARNING: order_status fetch failed; continuing to cancel"
+    fi
+    if curl -fksS --max-time 30 -X GET "$BASE/iserver/account/orders" -o "$OUT/live_orders.json"; then
+      echo "captured live_orders.json"
+    else
+      echo "WARNING: live_orders fetch failed; continuing to cancel"
+    fi
+    if curl -fksS --max-time 30 -X DELETE "$BASE/iserver/account/$ACCOUNT/order/$order_id" -o "$OUT/order_cancel.json"; then
+      echo "captured order_cancel.json (cancelled order $order_id)"
+    else
+      echo "WARNING: cancel request failed — verify no resting order remains for $order_id"
+    fi
     rm -f "$OUT/order_place.json"
   else
     echo "WARNING: no order_id parsed; skipping status/live/cancel. Inspect order_place/reply output."
