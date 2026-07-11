@@ -18,6 +18,9 @@ pub mod secdef;
 pub use auth::{AuthStatus, ServerInfo, TickleIServer, TickleResponse};
 pub use endpoint::{Endpoint, Method};
 pub use error::{CpapiError, WireError, decode};
-pub use order::{OrderPlaceReply, OrderRequest, PlaceOrderRequest, ReplyConfirm};
+pub use order::{
+    CancelResponse, LiveOrder, LiveOrders, OrderPlaceReply, OrderRequest, OrderStatus,
+    PlaceOrderRequest, ReplyConfirm,
+};
 pub use portfolio::{IServerAccounts, PortfolioAccount, Position};
 pub use secdef::{SecdefInfo, SecdefSearchEntry, SecdefSection};

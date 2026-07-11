@@ -1,5 +1,8 @@
 //! Tests for the cpapi order write-path DTOs (request serialize + response decode).
-use oath_adapter_ibkr::cpapi::{OrderPlaceReply, OrderRequest, PlaceOrderRequest, ReplyConfirm};
+use oath_adapter_ibkr::cpapi::{
+    CancelResponse, LiveOrders, OrderPlaceReply, OrderRequest, OrderStatus, PlaceOrderRequest,
+    ReplyConfirm,
+};
 
 #[test]
 fn order_request_serializes_with_renames_and_omits_absent_optionals() {
@@ -81,4 +84,36 @@ fn order_reply_confirmed_decodes_as_confirmation_shape() {
     // Question fields are absent on a confirmation.
     assert!(c.id.is_none());
     assert!(c.message.is_none());
+}
+
+#[test]
+fn cancel_response_decodes() {
+    use oath_adapter_ibkr::cpapi::decode;
+    let resp: CancelResponse =
+        decode(include_bytes!("fixtures/cpapi/order_cancel.json")).expect("cancel decodes");
+    assert_eq!(resp.order_id, Some(1_234_567_890));
+    assert_eq!(resp.msg.as_deref(), Some("Request was submitted"));
+}
+
+#[test]
+fn order_status_decodes_snake_fields() {
+    use oath_adapter_ibkr::cpapi::decode;
+    let status: OrderStatus =
+        decode(include_bytes!("fixtures/cpapi/order_status.json")).expect("status decodes");
+    assert_eq!(status.order_id, Some(1_234_567_890));
+    assert_eq!(status.order_status.as_deref(), Some("PreSubmitted"));
+    // Sizes arrive as strings on this endpoint — kept faithfully as String.
+    assert_eq!(status.total_size.as_deref(), Some("1"));
+}
+
+#[test]
+fn live_orders_decode_camel_fields() {
+    use oath_adapter_ibkr::cpapi::decode;
+    let live: LiveOrders =
+        decode(include_bytes!("fixtures/cpapi/live_orders.json")).expect("live orders decode");
+    assert_eq!(live.snapshot, Some(false));
+    let o = live.orders.first().expect("one live order");
+    assert_eq!(o.order_id, Some(1_234_567_890)); // renamed from "orderId"
+    assert_eq!(o.ticker.as_deref(), Some("AAPL"));
+    assert_eq!(o.order_type.as_deref(), Some("LIMIT")); // renamed from "orderType"
 }

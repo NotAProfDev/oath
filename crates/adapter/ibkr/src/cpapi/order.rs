@@ -85,3 +85,83 @@ pub struct OrderPlaceReply {
     /// Opaque encrypt-message token IBKR echoes on confirmation (confirmation shape).
     pub encrypt_message: Option<String>,
 }
+
+/// Response of `DELETE /iserver/account/{account}/order/{order_id}` — cancel ack.
+#[derive(Debug, Clone, Deserialize)]
+pub struct CancelResponse {
+    /// The cancelled order id (integer on this endpoint).
+    pub order_id: Option<i64>,
+    /// Human-readable acknowledgement, e.g. `"Request was submitted"`.
+    pub msg: Option<String>,
+    /// Contract id, when present.
+    pub conid: Option<i64>,
+    /// Account id, when present.
+    pub account: Option<String>,
+}
+
+/// Response of `GET /iserver/account/order/status/{order_id}`.
+///
+/// This endpoint is **`snake_case`**-native — no serde renames. Sizes arrive as strings
+/// (kept faithfully as `String`); `price` is a bare `serde_json::Number`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct OrderStatus {
+    /// Order id (integer on this endpoint).
+    pub order_id: Option<i64>,
+    /// Contract id, when present.
+    pub conid: Option<i64>,
+    /// Symbol, when present.
+    pub symbol: Option<String>,
+    /// Side token (e.g. `"B"`/`"S"`), when present.
+    pub side: Option<String>,
+    /// Order type token, when present.
+    pub order_type: Option<String>,
+    /// Order status, when present.
+    pub order_status: Option<String>,
+    /// Total order size, sent as a string.
+    pub total_size: Option<String>,
+    /// Cumulative filled size, sent as a string.
+    pub cum_fill: Option<String>,
+    /// Limit/last price, when present.
+    pub price: Option<serde_json::Number>,
+    /// Time in force, when present.
+    pub tif: Option<String>,
+}
+
+/// Response of `GET /iserver/account/orders` — the account's live orders.
+///
+/// This endpoint is **`camelCase`**-native, so each `LiveOrder` renames `orderId` /
+/// `orderType` / `totalSize` — contrast the snake-native `OrderStatus`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct LiveOrders {
+    /// The live orders (may be empty; a first call can return a warming snapshot).
+    #[serde(default)]
+    pub orders: Vec<LiveOrder>,
+    /// Whether this is a pre-warm snapshot rather than live data, when present.
+    pub snapshot: Option<bool>,
+}
+
+/// One element of a `LiveOrders` response.
+#[derive(Debug, Clone, Deserialize)]
+pub struct LiveOrder {
+    /// Account id, when present.
+    pub acct: Option<String>,
+    /// Contract id, when present.
+    pub conid: Option<i64>,
+    /// Order id (integer; `camelCase` `orderId` on this endpoint).
+    #[serde(rename = "orderId")]
+    pub order_id: Option<i64>,
+    /// Ticker symbol, when present.
+    pub ticker: Option<String>,
+    /// Side token, when present.
+    pub side: Option<String>,
+    /// Order status, when present.
+    pub status: Option<String>,
+    /// Order type (`camelCase` `orderType` on this endpoint), when present.
+    #[serde(rename = "orderType")]
+    pub order_type: Option<String>,
+    /// Total order size (`camelCase` `totalSize`), when present.
+    #[serde(rename = "totalSize")]
+    pub total_size: Option<serde_json::Number>,
+    /// Limit/last price, when present.
+    pub price: Option<serde_json::Number>,
+}
