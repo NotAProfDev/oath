@@ -1,4 +1,5 @@
-//! Endpoint descriptors for the Client Portal API v1 read path.
+//! Endpoint descriptors for the Client Portal API v1 — the read path and the
+//! order write path.
 //!
 //! An [`Endpoint`] is a pure value — an HTTP [`Method`] plus a path *relative to the
 //! gateway base URL* (`https://localhost:5000/v1/api`). This layer carries no
@@ -11,6 +12,8 @@ pub enum Method {
     Get,
     /// HTTP `POST`.
     Post,
+    /// HTTP `DELETE`.
+    Delete,
 }
 
 /// A Client Portal API v1 endpoint: an HTTP [`Method`] and a path relative to the
@@ -18,8 +21,9 @@ pub enum Method {
 ///
 /// This descriptor models the HTTP method and the path — including any query
 /// string — only. Request **bodies** (for example the `secdef_search` search
-/// payload `{symbol, secType}`) are supplied by the future request/transport
-/// binding and are not modeled in this read-path slice.
+/// payload `{symbol, secType}`, or the order-submission and reply-confirm bodies
+/// of the write path) are supplied by the future request/transport binding and
+/// are not modeled here.
 #[derive(Debug, Clone)]
 pub struct Endpoint {
     /// The HTTP method.
@@ -94,6 +98,53 @@ impl Endpoint {
         Self {
             method: Method::Get,
             path: format!("/iserver/secdef/info?conid={conid}"),
+        }
+    }
+
+    /// `POST /iserver/account/{account_id}/orders` — submit one or more orders.
+    /// The body (a `PlaceOrderRequest`) is supplied by the transport, not this descriptor.
+    #[must_use]
+    pub fn place_orders(account_id: &str) -> Self {
+        Self {
+            method: Method::Post,
+            path: format!("/iserver/account/{account_id}/orders"),
+        }
+    }
+
+    /// `POST /iserver/reply/{reply_id}` — confirm a suppressible order warning
+    /// (body `{"confirmed":true}`, a `ReplyConfirm`).
+    #[must_use]
+    pub fn reply(reply_id: &str) -> Self {
+        Self {
+            method: Method::Post,
+            path: format!("/iserver/reply/{reply_id}"),
+        }
+    }
+
+    /// `DELETE /iserver/account/{account_id}/order/{order_id}` — cancel a live order.
+    #[must_use]
+    pub fn cancel_order(account_id: &str, order_id: &str) -> Self {
+        Self {
+            method: Method::Delete,
+            path: format!("/iserver/account/{account_id}/order/{order_id}"),
+        }
+    }
+
+    /// `GET /iserver/account/order/status/{order_id}` — status of a single order.
+    #[must_use]
+    pub fn order_status(order_id: &str) -> Self {
+        Self {
+            method: Method::Get,
+            path: format!("/iserver/account/order/status/{order_id}"),
+        }
+    }
+
+    /// `GET /iserver/account/orders` — the account's live orders.
+    #[must_use]
+    pub fn live_orders() -> Self {
+        Self {
+            method: Method::Get,
+            path: "/iserver/account/orders".to_owned(),
         }
     }
 }

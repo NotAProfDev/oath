@@ -1,5 +1,5 @@
 //! Endpoint path-rendering tests — one assertion group per constructor, covering
-//! all seven Client Portal API v1 read-path endpoints.
+//! the Client Portal API v1 read-path and order write-path endpoints.
 use oath_adapter_ibkr::cpapi::{Endpoint, Method};
 
 #[test]
@@ -51,4 +51,39 @@ fn secdef_info_path_interpolates_conid_only() {
     let ep = Endpoint::secdef_info(265_598);
     assert_eq!(ep.method, Method::Get);
     assert_eq!(ep.path, "/iserver/secdef/info?conid=265598");
+}
+
+#[test]
+fn place_orders_is_a_post_with_account_in_path() {
+    let ep = Endpoint::place_orders("DU0000000");
+    assert_eq!(ep.method, Method::Post);
+    assert_eq!(ep.path, "/iserver/account/DU0000000/orders");
+}
+
+#[test]
+fn reply_interpolates_the_reply_id() {
+    let ep = Endpoint::reply("a1b2c3d4-0000");
+    assert_eq!(ep.method, Method::Post);
+    assert_eq!(ep.path, "/iserver/reply/a1b2c3d4-0000");
+}
+
+#[test]
+fn cancel_order_is_a_delete() {
+    let ep = Endpoint::cancel_order("DU0000000", "1234567890");
+    assert_eq!(ep.method, Method::Delete);
+    assert_eq!(ep.path, "/iserver/account/DU0000000/order/1234567890");
+}
+
+#[test]
+fn order_status_interpolates_the_order_id() {
+    let ep = Endpoint::order_status("1234567890");
+    assert_eq!(ep.method, Method::Get);
+    assert_eq!(ep.path, "/iserver/account/order/status/1234567890");
+}
+
+#[test]
+fn live_orders_is_a_get() {
+    let ep = Endpoint::live_orders();
+    assert_eq!(ep.method, Method::Get);
+    assert_eq!(ep.path, "/iserver/account/orders");
 }
