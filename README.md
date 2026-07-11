@@ -25,7 +25,7 @@ Every subsystem is defined behind a trait. Backends, adapters, transports, and s
 | `oath-adapter-net-api` | Transport-neutral composition primitives (`Layer`, `LayerBuilder`, `Stack`) + `ErrorKind` / `Timer` |
 | `oath-adapter-net-http-api` | HTTP transport contract (`Service`, …) over the `oath-adapter-net-api` kernel |
 | `oath-adapter-net-ws-api` | WebSocket transport contract (`Frame`, `WsSink`/`WsSource`, `Lifecycle`, `WsConnector`, …) over the `oath-adapter-net-api` kernel |
-| `oath-adapter-ibkr` | IBKR venue adapter — Client Portal API v1 (`cpapi`) read-path wire layer; `webapi` (beta OAuth) / `tws` (socket) surfaces to follow |
+| `oath-adapter-ibkr` | IBKR venue adapter — Client Portal API v1 (`cpapi`) read + order-write wire layer; `webapi` (beta OAuth) / `tws` (socket) surfaces to follow |
 | `oath-strategy-api` | User-facing `Strategy` trait and Signal ergonomics (the canonical `Signal` payload lives in `oath-model`, per ADR-0028) |
 | `oath-strategy-host` | Strategy Node binary: hosts user strategies, isolated from Core |
 | `oath-cli` | The first Frontend (MVP) |
@@ -70,7 +70,7 @@ graph TD
     sup[oath-supervisor] --> model
 ```
 
-The crates above are compiling skeletons. Bus/Event-Log/persistence backends (e.g. `oath-bus-iceoryx2`, `oath-event-log-chronicle`, `oath-persistence-sqlite`) are coming soon. The first venue adapter, `oath-adapter-ibkr`, has begun with its Client Portal API v1 read-path wire layer.
+The crates above are compiling skeletons. Bus/Event-Log/persistence backends (e.g. `oath-bus-iceoryx2`, `oath-event-log-chronicle`, `oath-persistence-sqlite`) are coming soon. The first venue adapter, `oath-adapter-ibkr`, covers the Client Portal API v1 read and order-write wire layers.
 
 ## Setup
 
