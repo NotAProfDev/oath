@@ -6,7 +6,7 @@
 //! `tif` are kept as `String` (the wire's own tokens); the mapping onto OATH's
 //! domain types is the deferred translation layer's job.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// One order in a `POST /iserver/account/{account}/orders` request body.
 ///
@@ -55,4 +55,33 @@ pub struct PlaceOrderRequest {
 pub struct ReplyConfirm {
     /// `true` to confirm the warning and proceed.
     pub confirmed: bool,
+}
+
+/// One element of a place-order or reply-confirm response.
+///
+/// The Client Portal API returns *either* a list of suppressible warning **questions**
+/// (confirm each via `POST /iserver/reply/{id}`) *or* a list of order **confirmations**
+/// — from both `POST …/orders` and `POST /iserver/reply/{id}`. Rather than a serde
+/// `untagged` enum (order-sensitive, poor errors), this is one all-optional struct
+/// carrying both shapes; the caller inspects which fields are present. `decode` it as
+/// `Vec<OrderPlaceReply>`.
+///
+/// `order_id` is a **string** here; on `order/status` and `account/orders` the same
+/// logical id arrives as an **integer** (`OrderStatus`, `LiveOrder`) — the faithful
+/// mirror keeps each as the wire sends it.
+#[derive(Debug, Clone, Deserialize)]
+pub struct OrderPlaceReply {
+    /// Question id to echo back to `POST /iserver/reply/{id}` (question shape).
+    pub id: Option<String>,
+    /// Human-readable warning lines (question shape).
+    pub message: Option<Vec<String>>,
+    /// Whether this warning can be suppressed (question shape).
+    #[serde(rename = "isSuppressed")]
+    pub is_suppressed: Option<bool>,
+    /// Placed order id, as a string (confirmation shape).
+    pub order_id: Option<String>,
+    /// Order status, e.g. `"PreSubmitted"` (confirmation shape).
+    pub order_status: Option<String>,
+    /// Opaque encrypt-message token IBKR echoes on confirmation (confirmation shape).
+    pub encrypt_message: Option<String>,
 }
