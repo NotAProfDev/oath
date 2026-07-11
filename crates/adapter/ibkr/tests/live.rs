@@ -120,10 +120,13 @@ fn live_order_place_confirm_cancel_round_trip() {
     ]);
     let mut replies: Vec<OrderPlaceReply> = decode(&placed).expect("place decodes");
 
+    // Arm the cancel guard the moment an order id is known — a plain place may confirm
+    // directly, otherwise each confirmed reply reveals it — so a panic mid-flow cannot
+    // strand a resting order.
     let mut guard = CancelGuard {
         base: &base,
         account: &account,
-        order_id: None,
+        order_id: replies.first().and_then(|r| r.order_id.clone()),
     };
 
     // Confirm the reply chain until an order_id appears (bounded).
@@ -144,6 +147,7 @@ fn live_order_place_confirm_cancel_round_trip() {
             &reply_body,
         ]);
         replies = decode(&confirmed).expect("reply decodes");
+        guard.order_id = replies.first().and_then(|r| r.order_id.clone());
     }
     let order_id = replies
         .first()

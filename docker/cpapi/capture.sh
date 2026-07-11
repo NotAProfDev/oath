@@ -76,7 +76,7 @@ print(d[0].get(sys.argv[2],"") if isinstance(d,list) and d else "")' "$1" "$2"
     confirm_file="$OUT/order_reply_confirmed.json"
   else
     echo "no reply question was raised; order_place.json IS the confirmation."
-    echo "  -> keeping the representative order_place_questions.json (no live warning raised)."
+    echo "  -> keeping the committed representative order_place_questions.json (no live warning raised)."
     cp "$OUT/order_place.json" "$OUT/order_reply_confirmed.json"
     confirm_file="$OUT/order_reply_confirmed.json"
   fi

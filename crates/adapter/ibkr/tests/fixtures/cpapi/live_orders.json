@@ -22,14 +22,14 @@
       "outsideRTH": false,
       "origOrderType": "LIMIT",
       "supportsTaxOpt": "1",
-      "lastExecutionTime": "260711115313",
+      "lastExecutionTime": "000000000000",
       "orderType": "Limit",
       "bgColor": "#FFFFFF",
       "fgColor": "#0000CC",
       "isEventTrading": "0",
       "price": "1.00",
       "timeInForce": "CLOSE",
-      "lastExecutionTime_r": 1783770793000,
+      "lastExecutionTime_r": 0,
       "side": "BUY"
     }
   ],
