@@ -1,0 +1,37 @@
+{
+  "orders": [
+    {
+      "acct": "DU0000000",
+      "conidex": "265598",
+      "conid": 265598,
+      "account": "DU0000000",
+      "orderId": 1234567890,
+      "cashCcy": "USD",
+      "sizeAndFills": "0/1",
+      "orderDesc": "Buy 1 AAPL Limit 1.00, Day",
+      "description1": "AAPL",
+      "ticker": "AAPL",
+      "secType": "STK",
+      "listingExchange": "NASDAQ.NMS",
+      "remainingQuantity": 1.0,
+      "filledQuantity": 0.0,
+      "totalSize": 1.0,
+      "companyName": "APPLE INC",
+      "status": "PreSubmitted",
+      "order_ccp_status": "Submitted",
+      "outsideRTH": false,
+      "origOrderType": "LIMIT",
+      "supportsTaxOpt": "1",
+      "lastExecutionTime": "000000000000",
+      "orderType": "Limit",
+      "bgColor": "#FFFFFF",
+      "fgColor": "#0000CC",
+      "isEventTrading": "0",
+      "price": "1.00",
+      "timeInForce": "CLOSE",
+      "lastExecutionTime_r": 0,
+      "side": "BUY"
+    }
+  ],
+  "snapshot": true
+}

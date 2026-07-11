@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`oath-adapter-ibkr` — CP API v1 order write-path wire layer.** Request-body serde
+  DTOs (`OrderRequest`/`PlaceOrderRequest`/`ReplyConfirm` — the crate's first serialize
+  direction), the order/reply union response (`OrderPlaceReply`, one all-optional struct),
+  and cancel/status/live-orders response DTOs (`CancelResponse`, `OrderStatus`,
+  `LiveOrders`/`LiveOrder`), plus `Endpoint` descriptors for place / reply-confirm /
+  cancel / order-status / live-orders (`Method::Delete` added). No transport, auth, or
+  OATH-domain translation (ADR-0022/0026 untouched). Fixtures are real, sanitized paper
+  captures via an extended `just ibkr-capture` order dance; a gated `#[ignore]` live test
+  drives a place → confirm → cancel round-trip.
+
 ### Changed
 
 - **net-api compose polish — no behaviour change.** Added `#[must_use]` to
