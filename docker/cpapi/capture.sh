@@ -76,8 +76,9 @@ print(d[0].get(sys.argv[2],"") if isinstance(d,list) and d else "")' "$1" "$2"
     confirm_file="$OUT/order_reply_confirmed.json"
   else
     echo "no reply question was raised; order_place.json IS the confirmation."
-    echo "  -> author order_place_questions.json as a documented representative fixture."
-    confirm_file="$OUT/order_place.json"
+    echo "  -> keeping the representative order_place_questions.json (no live warning raised)."
+    cp "$OUT/order_place.json" "$OUT/order_reply_confirmed.json"
+    confirm_file="$OUT/order_reply_confirmed.json"
   fi
 
   order_id=$(jget "$confirm_file" order_id)
@@ -87,10 +88,22 @@ print(d[0].get(sys.argv[2],"") if isinstance(d,list) and d else "")' "$1" "$2"
     else
       echo "WARNING: order_status fetch failed; continuing to cancel"
     fi
-    if curl -fksS --max-time 30 -X GET "$BASE/iserver/account/orders" -o "$OUT/live_orders.json"; then
+    # /iserver/account/orders returns an empty snapshot on the first call
+    # (snapshot warming); poll until it populates or the attempts run out.
+    live_ok=""
+    for _ in 1 2 3 4 5; do
+      if curl -fksS --max-time 30 -X GET "$BASE/iserver/account/orders" -o "$OUT/live_orders.json"; then
+        orders_n=$(python3 -c 'import json,sys
+d=json.load(open(sys.argv[1]))
+print(len(d.get("orders",[])) if isinstance(d,dict) else 0)' "$OUT/live_orders.json" 2>/dev/null || echo 0)
+        if [ "${orders_n:-0}" -gt 0 ]; then live_ok=1; break; fi
+      fi
+      sleep 1
+    done
+    if [ -n "$live_ok" ]; then
       echo "captured live_orders.json"
     else
-      echo "WARNING: live_orders fetch failed; continuing to cancel"
+      echo "WARNING: live_orders still empty after retries (snapshot warming); continuing to cancel"
     fi
     if curl -fksS --max-time 30 -X DELETE "$BASE/iserver/account/$ACCOUNT/order/$order_id" -o "$OUT/order_cancel.json"; then
       echo "captured order_cancel.json (cancelled order $order_id)"

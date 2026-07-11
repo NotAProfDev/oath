@@ -104,8 +104,9 @@ fn order_status_decodes_snake_fields() {
         decode(include_bytes!("fixtures/cpapi/order_status.json")).expect("status decodes");
     assert_eq!(status.order_id, Some(1_234_567_890));
     assert_eq!(status.order_status.as_deref(), Some("PreSubmitted"));
-    // Sizes arrive as strings on this endpoint — kept faithfully as String.
-    assert_eq!(status.total_size.as_deref(), Some("1"));
+    // Sizes and the limit price arrive as strings on this endpoint — kept faithfully.
+    assert_eq!(status.total_size.as_deref(), Some("1.0"));
+    assert_eq!(status.limit_price.as_deref(), Some("1.00"));
 }
 
 #[test]
@@ -113,9 +114,10 @@ fn live_orders_decode_camel_fields() {
     use oath_adapter_ibkr::cpapi::decode;
     let live: LiveOrders =
         decode(include_bytes!("fixtures/cpapi/live_orders.json")).expect("live orders decode");
-    assert_eq!(live.snapshot, Some(false));
+    assert_eq!(live.snapshot, Some(true));
     let o = live.orders.first().expect("one live order");
     assert_eq!(o.order_id, Some(1_234_567_890)); // renamed from "orderId"
     assert_eq!(o.ticker.as_deref(), Some("AAPL"));
-    assert_eq!(o.order_type.as_deref(), Some("LIMIT")); // renamed from "orderType"
+    assert_eq!(o.order_type.as_deref(), Some("Limit")); // renamed from "orderType"
+    assert_eq!(o.price.as_deref(), Some("1.00")); // string on this endpoint
 }

@@ -101,8 +101,8 @@ pub struct CancelResponse {
 
 /// Response of `GET /iserver/account/order/status/{order_id}`.
 ///
-/// This endpoint is **`snake_case`**-native — no serde renames. Sizes arrive as strings
-/// (kept faithfully as `String`); `price` is a bare `serde_json::Number`.
+/// This endpoint is **`snake_case`**-native — no serde renames. Sizes and the limit
+/// price arrive as strings (kept faithfully as `String`).
 #[derive(Debug, Clone, Deserialize)]
 pub struct OrderStatus {
     /// Order id (integer on this endpoint).
@@ -121,10 +121,12 @@ pub struct OrderStatus {
     pub total_size: Option<String>,
     /// Cumulative filled size, sent as a string.
     pub cum_fill: Option<String>,
-    /// Limit/last price, when present.
-    pub price: Option<serde_json::Number>,
+    /// Limit price, sent as a string (the wire field is `limit_price`), when present.
+    pub limit_price: Option<String>,
     /// Time in force, when present.
     pub tif: Option<String>,
+    /// Account id, when present.
+    pub account: Option<String>,
 }
 
 /// Response of `GET /iserver/account/orders` — the account's live orders.
@@ -162,6 +164,6 @@ pub struct LiveOrder {
     /// Total order size (`camelCase` `totalSize`), when present.
     #[serde(rename = "totalSize")]
     pub total_size: Option<serde_json::Number>,
-    /// Limit/last price, when present.
-    pub price: Option<serde_json::Number>,
+    /// Limit price, sent as a string on this endpoint, when present.
+    pub price: Option<String>,
 }

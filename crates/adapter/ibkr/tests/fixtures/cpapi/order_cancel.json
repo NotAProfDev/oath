@@ -1,1 +1,6 @@
-{"order_id":1234567890,"msg":"Request was submitted","conid":265598,"account":"DU0000000"}
+{
+  "msg": "Request was submitted",
+  "order_id": 1234567890,
+  "conid": -1,
+  "account": null
+}
