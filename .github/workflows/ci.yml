@@ -35,7 +35,7 @@ jobs:
     steps:
       # Every action is pinned to a full commit SHA (supply-chain hardening); the
       # trailing comment records the human-readable version Dependabot keeps fresh.
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # CI never pushes; don't persist the token in .git/config.
           persist-credentials: false
@@ -54,7 +54,7 @@ jobs:
       # Single fast installer for every non-rustc tool the just recipes call.
       # If a tool name errors, check the supported list at
       # https://github.com/taiki-e/install-action and adjust that one name.
-      - uses: taiki-e/install-action@c93ccc03e00cd0e08e494f5fd058a6c55a6a1907 # v2.82.8
+      - uses: taiki-e/install-action@07b4745e0c39a41822af610387492e3e53aa222b # v2.83.4
         with:
           tool: just,cargo-nextest,cargo-deny,cargo-machete,taplo-cli,typos-cli,shellcheck
 
@@ -104,7 +104,7 @@ jobs:
     env:
       CARGO_TERM_COLOR: always
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -117,7 +117,7 @@ jobs:
         with:
           key: msrv
 
-      - uses: taiki-e/install-action@c93ccc03e00cd0e08e494f5fd058a6c55a6a1907 # v2.82.8
+      - uses: taiki-e/install-action@07b4745e0c39a41822af610387492e3e53aa222b # v2.83.4
         with:
           tool: just
 
