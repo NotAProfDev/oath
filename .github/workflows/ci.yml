@@ -35,7 +35,7 @@ jobs:
     steps:
       # Every action is pinned to a full commit SHA (supply-chain hardening); the
       # trailing comment records the human-readable version Dependabot keeps fresh.
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # CI never pushes; don't persist the token in .git/config.
           persist-credentials: false
@@ -49,12 +49,12 @@ jobs:
           components: rustfmt, clippy
 
       # Cache registry/git/target keyed by OS + Rust version + Cargo.lock.
-      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
 
       # Single fast installer for every non-rustc tool the just recipes call.
       # If a tool name errors, check the supported list at
       # https://github.com/taiki-e/install-action and adjust that one name.
-      - uses: taiki-e/install-action@c93ccc03e00cd0e08e494f5fd058a6c55a6a1907 # v2.82.8
+      - uses: taiki-e/install-action@6c6fd71fe4fb72c3697d269963d0e15df8adedad # v2.85.10
         with:
           tool: just,cargo-nextest,cargo-deny,cargo-machete,taplo-cli,typos-cli,shellcheck
 
@@ -104,7 +104,7 @@ jobs:
     env:
       CARGO_TERM_COLOR: always
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -113,11 +113,11 @@ jobs:
           toolchain: "1.90"
 
       # Cache keyed separately from the `ci` job because of the different toolchain.
-      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: msrv
 
-      - uses: taiki-e/install-action@c93ccc03e00cd0e08e494f5fd058a6c55a6a1907 # v2.82.8
+      - uses: taiki-e/install-action@6c6fd71fe4fb72c3697d269963d0e15df8adedad # v2.85.10
         with:
           tool: just
 
