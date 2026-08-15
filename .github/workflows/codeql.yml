@@ -39,7 +39,7 @@ jobs:
     steps:
       # Every action is pinned to a full commit SHA (supply-chain hardening); the
       # trailing comment records the human-readable version Dependabot keeps fresh.
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # CodeQL never pushes; don't persist the token in .git/config.
           persist-credentials: false
@@ -48,12 +48,12 @@ jobs:
       # so no Rust toolchain setup or cargo build is required. Default query suite
       # (high precision, low false-positive) is used when `queries` is omitted.
       - name: initialize CodeQL
-        uses: github/codeql-action/init@54f647b7e1bb85c95cddabcd46b0c578ec92bc1a # v4.36.3
+        uses: github/codeql-action/init@5595ccaf912efad79be6eef63a5619ff05969be3 # v4.37.6
         with:
           languages: rust
           build-mode: none
 
       - name: perform CodeQL analysis
-        uses: github/codeql-action/analyze@54f647b7e1bb85c95cddabcd46b0c578ec92bc1a # v4.36.3
+        uses: github/codeql-action/analyze@5595ccaf912efad79be6eef63a5619ff05969be3 # v4.37.6
         with:
           category: "/language:rust"
